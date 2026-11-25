@@ -118,6 +118,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private boolean standbyHas;
     private boolean standbyHome;
 
+    /** Every music card key starts with this, which is how a stopped track is recognised. */
+    private static final String MUSIC_KEY = "music:";
+
     static boolean isRunning() {
         return running;
     }

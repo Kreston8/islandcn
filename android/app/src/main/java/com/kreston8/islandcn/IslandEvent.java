@@ -421,7 +421,7 @@ final class IslandEvent {
                 if (person == null) {
                     continue;
                 }
-                Uri uri = person.getIconUri();
+                Uri uri = person.getUri();
                 if (uri == null) {
                     continue;
                 }

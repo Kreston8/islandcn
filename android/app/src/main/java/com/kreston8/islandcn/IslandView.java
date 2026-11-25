@@ -48,8 +48,8 @@ public final class IslandView extends FrameLayout {
 
     private static final int W_COLLAPSED_DP = 78;
     private static final int H_COLLAPSED_DP = 32;
-    private static final int H_EXPANDED_DP = 44;
     private static final int H_EXPANDED_DP = 46;
+    private static final int W_EXPANDED_MAX_DP = 360;
     private static final int W_EXPANDED_MIN_DP = 250;
     private static final float R_EXPANDED_DP = 22f;
     private static final long EXPAND_MS = 420L;
