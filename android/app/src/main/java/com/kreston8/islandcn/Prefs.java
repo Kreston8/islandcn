@@ -27,6 +27,14 @@ final class Prefs {
     /** Not a card kind: the karaoke line itself, which is the only feature that opens a socket. */
     static final String KEY_LYRICS = "on_lyrics";
     static final String KEY_ALARM_SHOWN = "alarm_shown";
+    /**
+     * Which of the three alarm heads-ups were already said, written by {@link AlarmWatcher} as
+     * {@code "<triggerMillis>|<bitmask>"}. Stored as text because the pair means nothing to this
+     * class: only its writer parses it back.
+     */
+    public static final String KEY_ALARM_STAGE = "alarm_stage";
+    /** Card keys the user closed by hand, newest last, one per line. */
+    public static final String KEY_DISMISSED = "dismissed";
 
     /** Bluetooth battery chips: on by default, and each accessory has its own switch below it. */
     static final String KEY_BT = "on_bt";
@@ -133,6 +141,97 @@ final class Prefs {
             store(context).edit().putLong(KEY_ALARM_SHOWN, trigger).apply();
         } catch (Throwable ignored) {
             // A read-only profile keeps the previous value; the card is still withdrawn by hand.
+        }
+    }
+
+    /** How many closed cards are remembered before the oldest one is forgotten. */
+    private static final int DISMISSED_MAX = 40;
+
+    /**
+     * The heads-up stage record as written by {@link AlarmWatcher}.
+     *
+     * <p>Never null: a fresh install, a wiped preference store and a read-only profile all read
+     * back {@code ""}, which the watcher treats as "nothing said yet".
+     */
+    public static String getAlarmStage(Context context) {
+        try {
+            String value = store(context).getString(KEY_ALARM_STAGE, "");
+            return value == null ? "" : value;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /** Stores the record verbatim; null is stored as empty so a later read stays non-null. */
+    public static void setAlarmStage(Context context, String value) {
+        try {
+            store(context).edit().putString(KEY_ALARM_STAGE, value == null ? "" : value).apply();
+        } catch (Throwable ignored) {
+            // A read-only profile keeps the old record; the watcher then repeats at most one stage.
+        }
+    }
+
+    /**
+     * The card keys the user closed by hand, oldest first.
+     *
+     * <p>Only this list is needed to keep a closed card from coming back: it holds at most
+     * {@link #DISMISSED_MAX} entries, so it cannot grow without bound.
+     */
+    public static java.util.Set<String> dismissed(Context context) {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<String>();
+        String raw = text(context, KEY_DISMISSED);
+        if (raw.isEmpty()) {
+            return keys;
+        }
+        for (String part : raw.split("\n")) {
+            String key = part == null ? "" : part.trim();
+            if (!key.isEmpty()) {
+                keys.add(key);
+            }
+        }
+        return keys;
+    }
+
+    /** True when this exact card was closed by the user, so it must not be shown again. */
+    public static boolean isDismissed(Context context, String key) {
+        if (key == null || key.isEmpty()) {
+            return false;
+        }
+        return dismissed(context).contains(key);
+    }
+
+    /** Remembers one closed card, keeping the newest {@link #DISMISSED_MAX} of them. */
+    public static void addDismissed(Context context, String key) {
+        if (key == null || key.isEmpty()) {
+            return;
+        }
+        java.util.Set<String> keys = dismissed(context);
+        keys.remove(key);
+        keys.add(key);
+        while (keys.size() > DISMISSED_MAX) {
+            java.util.Iterator<String> oldest = keys.iterator();
+            if (!oldest.hasNext()) {
+                break;
+            }
+            oldest.next();
+            oldest.remove();
+        }
+        StringBuilder raw = new StringBuilder();
+        for (String item : keys) {
+            if (raw.length() > 0) {
+                raw.append('\n');
+            }
+            raw.append(item);
+        }
+        setText(context, KEY_DISMISSED, raw.toString());
+    }
+
+    /** Forgets every closed card, e.g. when the switches are reset. */
+    public static void clearDismissed(Context context) {
+        try {
+            store(context).edit().remove(KEY_DISMISSED).apply();
+        } catch (Throwable ignored) {
+            // A read-only profile keeps the old list; nothing else depends on it being empty.
         }
     }
 

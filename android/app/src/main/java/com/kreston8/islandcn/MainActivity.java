@@ -18,6 +18,7 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.SeekBar;
+import android.widget.HorizontalScrollView;
 import android.widget.Toast;
 
 import java.util.function.Consumer;
@@ -41,6 +42,7 @@ public final class MainActivity extends Activity {
     private TextView serviceState;
     private Button startStop;
     private TextView btState;
+    private TextView btDiagView;
     private Button cityButton;
     private LinearLayout standbyRows;
     private TextView weatherState;
@@ -110,6 +112,20 @@ public final class MainActivity extends Activity {
         addTop(usageCard, button(R.string.grant, v -> Perms.openUsageAccessSettings(this)), 12);
         addFill(root, usageCard, 14);
 
+        LinearLayout btCard = card();
+        addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(btCard, text(R.string.perm_bt_desc, 13f, COLOR_SECONDARY, false), 6);
+        btState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(btCard, btState, 10);
+        btDiagView = new TextView(this);
+        btDiagView.setTextSize(12f);
+        btDiagView.setTextColor(0xFF8A8A94);
+        btDiagView.setLineSpacing(dp(3), 1f);
+        addFill(btCard, btDiagView, 4);
+        addTop(btCard, button(R.string.grant, v -> requestBluetooth()), 12);
+        addFill(btCard, text(R.string.bt_hint, 12f, 0xFF8A8A94, false), 8);
+        addFill(root, btCard, 14);
+
         LinearLayout serviceCard = card();
         addFill(serviceCard, text(R.string.state_title, 16f, COLOR_PRIMARY, true), 0);
         serviceState = text(R.string.service_off, 13f, COLOR_IDLE, true);
@@ -145,7 +161,12 @@ public final class MainActivity extends Activity {
         addFill(lookCard, text(R.string.look_color, 13f, COLOR_PRIMARY, true), 14);
         swatches = new LinearLayout(this);
         swatches.setOrientation(LinearLayout.HORIZONTAL);
-        addFill(lookCard, swatches, 8);
+        HorizontalScrollView swatchScroll = new HorizontalScrollView(this);
+        swatchScroll.setHorizontalScrollBarEnabled(false);
+        swatchScroll.setClipToPadding(false);
+        swatchScroll.setFillViewport(false);
+        swatchScroll.addView(swatches);
+        addFill(lookCard, swatchScroll, 8);
         renderSwatches();
         addFill(lookCard, text(R.string.look_alpha, 13f, COLOR_PRIMARY, true), 16);
         alphaBar = new SeekBar(this);
@@ -172,15 +193,6 @@ public final class MainActivity extends Activity {
         alphaValue.setText(getString(R.string.look_alpha_fmt, Look.percent(this)));
         addFill(lookCard, alphaValue, 2);
         addFill(root, lookCard, 14);
-
-        LinearLayout btCard = card();
-        addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(btCard, text(R.string.perm_bt_desc, 13f, COLOR_SECONDARY, false), 6);
-        btState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(btCard, btState, 10);
-        addTop(btCard, button(R.string.grant, v -> requestBluetooth()), 12);
-        addFill(btCard, text(R.string.bt_hint, 12f, 0xFF8A8A94, false), 8);
-        addFill(root, btCard, 14);
 
         LinearLayout standbyCard = card();
         addFill(standbyCard, text(R.string.label_standby, 16f, COLOR_PRIMARY, true), 0);
@@ -249,6 +261,10 @@ public final class MainActivity extends Activity {
         boolean bluetooth = canReadBluetooth();
         btState.setText(bluetooth ? R.string.granted : R.string.missing);
         btState.setTextColor(bluetooth ? COLOR_OK : COLOR_MISSING);
+        String btDiag = BtWatcher.probe(this);
+        if (btDiagView != null) {
+            btDiagView.setText("诊断：" + btDiag);
+        }
 
         boolean running = IslandService.isRunning();
         serviceState.setText(running ? R.string.service_on : R.string.service_off);

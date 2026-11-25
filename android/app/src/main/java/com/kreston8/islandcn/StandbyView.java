@@ -14,9 +14,11 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
+import android.view.MotionEvent;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
@@ -63,8 +65,10 @@ final class StandbyView extends FrameLayout {
     private String signature = "";
     private boolean hasContent;
     private DaozaiView face;
-    /** The lines the pill is showing, joined for the long-press copy. */
+    /** The line of the day, kept as it stands so a double tap copies the quote alone. */
     private String copyText = "";
+    /** When the last tap on the pill landed, for telling a double tap from a single one. */
+    private long lastTapAt = 0L;
 
     StandbyView(Context context) {
         super(context);
@@ -84,9 +88,20 @@ final class StandbyView extends FrameLayout {
         addView(row, new LayoutParams(LayoutParams.WRAP_CONTENT, dp(H_DP)));
         setVisibility(View.INVISIBLE);
 
-        // Long press copies what the pill shows; it sits on the desktop, where a long press has no
-        // other meaning.
-        setOnLongClickListener(v -> copyPill());
+        // A double tap copies the line of the day. It sits on the desktop, where a single tap and a
+        // long press carry no other meaning, and the listener returns false so nothing is swallowed.
+        setOnTouchListener((v, e) -> {
+            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                long now = SystemClock.uptimeMillis();
+                if (now - lastTapAt <= 240L) {
+                    lastTapAt = 0L;
+                    copyPill();
+                } else {
+                    lastTapAt = now;
+                }
+            }
+            return false;
+        });
     }
 
     boolean hasContent() {
@@ -153,7 +168,8 @@ final class StandbyView extends FrameLayout {
         face = null;
         row.removeAllViews();
         int count = 0;
-        StringBuilder copy = new StringBuilder();
+        // Nothing is copied until the quote is actually drawn.
+        copyText = "";
         for (String item : order) {
             if ("weather".equals(item)) {
                 if (!weatherOn || temperature == null) {
@@ -161,14 +177,12 @@ final class StandbyView extends FrameLayout {
                 }
                 row.addView(weatherIcon(code, temperature));
                 count++;
-                appendPart(copy, temperature);
             } else if ("aqi".equals(item)) {
                 if (!aqiOn || air == null || air.isEmpty()) {
                     continue;
                 }
                 TextView badge = label("AQI " + air, aqiColor(air), 12.5f, true);
                 row.addView(badge, margin());
-                appendPart(copy, "AQI " + air);
                 count++;
             } else if ("puppy".equals(item)) {
                 if (!faceOn) {
@@ -183,15 +197,19 @@ final class StandbyView extends FrameLayout {
                 if (!quoteOn || quote.isEmpty()) {
                     continue;
                 }
-                // Serif and bold, the widest thing in the pill: the line is cut rather than wrapped
-                // so the pill stays one row.
+                // Serif and bold, the widest thing in the pill: a line longer than the cap scrolls
+                // like an LED banner instead of being cut or widening the pill past the screen.
                 TextView line = label(quote, 0xFFDDDDE4, 17.5f, true);
                 line.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
-                line.setMaxWidth(dp(320));
                 line.setSingleLine(true);
-                line.setEllipsize(TextUtils.TruncateAt.END);
+                line.setHorizontallyScrolling(true);
+                line.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+                line.setMarqueeRepeatLimit(-1);
+                line.setMaxWidth(dp(230));
+                line.setSelected(true);
                 row.addView(line, margin());
-                appendPart(copy, quote);
+                // A double tap copies this exact line.
+                copyText = quote;
                 count++;
             } else if ("bt".equals(item)) {
                 LinearLayout accessories = btChips(devices);
@@ -200,10 +218,8 @@ final class StandbyView extends FrameLayout {
                 }
                 row.addView(accessories, margin());
                 count++;
-                appendDevices(copy, devices);
             }
         }
-        copyText = copy.toString();
         hasContent = count > 0;
         return hasContent;
     }
@@ -216,9 +232,9 @@ final class StandbyView extends FrameLayout {
     }
 
     /**
-     * Copies the lines the pill is showing, so a long press on the quote gives the quote alone.
+     * Copies the line of the day, so a double tap on the pill gives the quote alone.
      *
-     * @return true when there was something to copy, which swallows the long press.
+     * @return true when there was something to copy.
      */
     private boolean copyPill() {
         if (copyText.isEmpty()) {
@@ -232,42 +248,11 @@ final class StandbyView extends FrameLayout {
             }
             clipboard.setPrimaryClip(ClipData.newPlainText(
                     getContext().getString(R.string.app_name), copyText));
-            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             Toast.makeText(getContext(), R.string.copied_all, Toast.LENGTH_SHORT).show();
             return true;
         } catch (Throwable failure) {
             return false;
-        }
-    }
-
-    private static void appendPart(StringBuilder out, String part) {
-        if (part == null) {
-            return;
-        }
-        String value = part.trim();
-        if (value.isEmpty()) {
-            return;
-        }
-        if (out.length() > 0) {
-            out.append(" · ");
-        }
-        out.append(value);
-    }
-
-    /** Only the accessories the pill actually drew, which is at most three. */
-    private static void appendDevices(StringBuilder out, java.util.List<IslandEvent.Bt> devices) {
-        if (devices == null) {
-            return;
-        }
-        int shown = 0;
-        for (IslandEvent.Bt device : devices) {
-            if (device == null || shown >= 3) {
-                break;
-            }
-            String level = device.level >= 0 ? device.level + "%" : "--";
-            String name = device.name == null || device.name.isEmpty() ? "蓝牙" : device.name;
-            appendPart(out, name + " " + level);
-            shown++;
         }
     }
 

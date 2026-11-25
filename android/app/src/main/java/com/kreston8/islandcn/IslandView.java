@@ -2,7 +2,6 @@ package com.kreston8.islandcn;
 
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
@@ -15,62 +14,87 @@ import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.StyleSpan;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
-import android.view.animation.DecelerateInterpolator;
-import android.view.animation.OvershootInterpolator;
+import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
 /**
- * The island itself: a black pill that springs open into a card with the notification.
+ * The island itself: one fixed-height pill whose width follows its text.
  *
- * <p>The overlay window is WRAP_CONTENT, so animating the card's layout params is what makes the
- * window grow and shrink. Content cross-fades while the corners interpolate from a pill radius to a
- * card radius, which is what sells the "dynamic island" motion without any drawing code.
+ * <p>v2.12 removed the expand/collapse pair. The pill used to sit as a 78 x 32 dot and spring open
+ * into a 46 dp card on a tap; now it is always the card, so the first tap can mean something else
+ * (open the message) instead of "grow". The overlay window is still WRAP_CONTENT, which is what
+ * lets the card be exactly as wide as its own content.
  *
- * <p>The card body has three optional rows: a kind tag, a copyable code and a delivery countdown.
- * They are what turn a plain notification into a verification-code or delivery card.
+ * <p>The four gestures are the whole interaction model:
+ * <ul>
+ *   <li>double tap — copy what the card carries (a pickup code, a sentence);</li>
+ *   <li>left swipe — close this card for good, and let the service remember it;</li>
+ *   <li>long press, then up — shake, hide the island for three minutes, bring it back by itself;</li>
+ *   <li>plain up swipe — page to the next queued card;</li>
+ *   <li>single tap — open the message (an SMS thread, the clock, the app).</li>
+ * </ul>
+ *
+ * <p>A single tap has to wait {@link #DOUBLE_MS} before it becomes "open", because a second tap in
+ * that window means copy. Every other gesture fires on release.
+ *
+ * <p>The card body keeps three optional rows from earlier versions: a kind tag, a copyable code and
+ * a countdown; the Bluetooth chips sit at the right end.
  */
 public final class IslandView extends FrameLayout {
 
     /** What the island asks the service to do when the user touches it. */
     interface Actions {
+        /** Single tap: open the message, the clock or the app behind the card. */
         void onOpen();
 
+        /** Left swipe: close this card and never show that key again. */
         void onDismiss();
 
+        /** Double tap: put this text on the clipboard. */
         void onCopy(String value);
+
+        /** Up swipe: page to the next queued card. */
+        void onNext();
+
+        /** Long press then up: hide the island for this many milliseconds. */
+        void onHideFor(long millis);
     }
 
-    private static final int W_COLLAPSED_DP = 78;
-    private static final int H_COLLAPSED_DP = 32;
-    private static final int H_EXPANDED_DP = 46;
-    private static final int W_EXPANDED_MAX_DP = 360;
-    private static final int W_EXPANDED_MIN_DP = 250;
-    private static final float R_EXPANDED_DP = 22f;
-    private static final long EXPAND_MS = 420L;
-    private static final long COLLAPSE_MS = 280L;
+    private static final int H_DP = 46;
+    private static final float R_DP = 23f;
+    private static final int W_MAX_DP = 368;
+    private static final int W_MIN_DP = 190;
+    private static final int W_MUSIC_MIN_DP = 240;
     private static final long TICK_MS = 15000L;
     private static final long CYCLE_MS = 2600L;
-    private static final int H_MUSIC_DP = 46;
-    private static final int W_MUSIC_MIN_DP = 240;
     private static final long LYRIC_MS = 100L;
     private static final int BT_MAX = 3;
     /** Roughly one chip: the icon is 14 dp, the percentage under it a little wider. */
     private static final int BT_CHIP_DP = 26;
+    /** A second tap inside this window means copy; the single tap waits exactly this long. */
+    private static final long DOUBLE_MS = 240L;
+    /** How long a finger has to rest before the pill starts to shake. */
+    private static final long PRESS_MS = 380L;
+    /** Swipe distance, in dp, that counts as a gesture rather than a shaky tap. */
+    private static final int SWIPE_DP = 42;
+    /** Long press plus up: the island disappears for three minutes. */
+    private static final long HIDE_MS = 180_000L;
 
     private final float density;
     private final int minWidthPx;
     private final int maxWidthPx;
+    private final int musicMinPx;
     /** Current width before the Bluetooth chips, recomputed for every card. */
     private int baseWidthPx;
     private final FrameLayout card;
     private final GradientDrawable cardBackground = new GradientDrawable();
-    private final ImageView collapsedIcon;
     private final LinearLayout expandedBox;
     private final ImageView appIcon;
     private final LinearLayout headerRow;
@@ -85,28 +109,20 @@ public final class IslandView extends FrameLayout {
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = this::updateCountdown;
     private final Runnable advance = this::advanceCycle;
+    private final Runnable tapSoon = this::fireOpen;
 
-    private ValueAnimator animator;
-    private float fraction;
-    private boolean expanded;
     /** True while the card is the slim music strip, which sizes and pads differently. */
     private boolean musicMode;
     private Actions actions;
-    private float touchDownY;
-    private boolean swipedAway;
     private String copyValue;
-    /** Everything the card shows, copied on a long press; empty until the first bind. */
+    /** Everything the card shows, copied on a double tap; empty until the first bind. */
     private String copyAll = "";
-    /** True when the whole card is a link (an SMS), so the first tap opens it instead of folding. */
-    private boolean tapOpens;
     private long etaMillis;
     private int kind = IslandEvent.KIND_GENERIC;
-    private int expandedHeightDp = H_EXPANDED_DP;
     private CharSequence[] cycle;
     private int cycleIndex;
-    private final int musicMinPx;
     private int cardWidthPx;
-    private float expandedRadiusDp = R_EXPANDED_DP;
+
     private final Runnable lyricTick = this::tickLyric;
     private Lyric lyric;
     private long lyricBase;
@@ -114,13 +130,26 @@ public final class IslandView extends FrameLayout {
     private int sungLine = -1;
     private int sungChars = -1;
 
+    /** Where the finger went down, in raw screen coordinates. */
+    private float downX;
+    private float downY;
+    private long lastTapAt;
+    /** True when this touch sequence is the second tap of a double tap. */
+    private boolean secondTap;
+    /** True once the long press has fired and the pill shakes, waiting for the up swipe. */
+    private boolean armed;
+    /** True once the finger travelled far enough to be a swipe. */
+    private boolean moved;
+    private ValueAnimator shaker;
+    private final Runnable press = this::arm;
+
     IslandView(Context context) {
         super(context);
         density = getResources().getDisplayMetrics().density;
         maxWidthPx = Math.min(
-                dp(W_EXPANDED_MAX_DP),
+                dp(W_MAX_DP),
                 getResources().getDisplayMetrics().widthPixels - dp(24));
-        minWidthPx = Math.min(dp(W_EXPANDED_MIN_DP), maxWidthPx);
+        minWidthPx = Math.min(dp(W_MIN_DP), maxWidthPx);
         musicMinPx = Math.min(dp(W_MUSIC_MIN_DP), maxWidthPx);
         baseWidthPx = minWidthPx;
         cardWidthPx = minWidthPx;
@@ -129,19 +158,14 @@ public final class IslandView extends FrameLayout {
         cardBackground.setShape(GradientDrawable.RECTANGLE);
         cardBackground.setColor(Look.background(context));
         cardBackground.setStroke(dp(1), Look.stroke(context));
-        cardBackground.setCornerRadius(dp(H_COLLAPSED_DP) / 2f);
+        cardBackground.setCornerRadius(dp(R_DP));
         card.setBackground(cardBackground);
-        addView(card, new FrameLayout.LayoutParams(dp(W_COLLAPSED_DP), dp(H_COLLAPSED_DP)));
-
-        collapsedIcon = new ImageView(context);
-        collapsedIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        card.addView(collapsedIcon, new FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER));
+        addView(card, new FrameLayout.LayoutParams(minWidthPx, dp(H_DP)));
 
         expandedBox = new LinearLayout(context);
         expandedBox.setOrientation(LinearLayout.HORIZONTAL);
         expandedBox.setGravity(Gravity.CENTER_VERTICAL);
         expandedBox.setPadding(dp(10), 0, dp(6), 0);
-        expandedBox.setVisibility(View.INVISIBLE);
         card.addView(expandedBox, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
@@ -201,7 +225,7 @@ public final class IslandView extends FrameLayout {
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         copyParams.leftMargin = dp(6);
-        // Sits in the title row: a third line would not fit the 44 dp strip.
+        // Sits in the title row: a third line would not fit the 46 dp strip.
         headerRow.addView(copyRow, copyParams);
 
         codeView = new TextView(context);
@@ -244,66 +268,12 @@ public final class IslandView extends FrameLayout {
         LinearLayout.LayoutParams btParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         btParams.leftMargin = dp(4);
-        // Right end of the pill, before the close button.
+        // Right end of the pill; the close button that used to follow it is gone, because closing
+        // is now the left swipe.
         expandedBox.addView(btRow, btParams);
 
-        TextView close = new TextView(context);
-        close.setText("\u00d7");
-        close.setTextColor(0xFF8A8A94);
-        close.setTextSize(20f);
-        close.setPadding(dp(8), dp(8), dp(8), dp(8));
-        close.setOnClickListener(v -> {
-            if (actions != null) {
-                actions.onDismiss();
-            }
-        });
-        expandedBox.addView(close, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-
-        card.setOnClickListener(v -> {
-            if (swipedAway) {
-                swipedAway = false;
-                return;
-            }
-            if (!expanded && tapOpens) {
-                // A pickup code is worth more than a bigger card: the tap goes straight to the
-                // message it came from, and a long press still copies it.
-                if (actions != null) {
-                    actions.onOpen();
-                }
-                return;
-            }
-            if (expanded) {
-                if (actions != null) {
-                    actions.onOpen();
-                }
-            } else {
-                setExpanded(true, true);
-            }
-        });
-        // Long press copies the whole card. The framework swallows the tap that follows, so a
-        // long press never also expands the island.
-        card.setOnLongClickListener(v -> {
-            if (actions == null || copyAll == null || copyAll.isEmpty()) {
-                return false;
-            }
-            actions.onCopy(copyAll);
-            return true;
-        });
-        card.setOnTouchListener((v, event) -> {
-            if (event.getAction() == MotionEvent.ACTION_DOWN) {
-                touchDownY = event.getY();
-                swipedAway = false;
-            } else if (event.getAction() == MotionEvent.ACTION_UP && touchDownY - event.getY() > dp(34)) {
-                swipedAway = true;
-                if (actions != null) {
-                    actions.onDismiss();
-                }
-            }
-            return false;
-        });
-
-        applyFraction(0f);
+        card.setOnTouchListener(this::touch);
+        applySizes();
     }
 
     void setActions(Actions actions) {
@@ -318,7 +288,6 @@ public final class IslandView extends FrameLayout {
         setMusicMode(music);
         if (event.icon != null) {
             appIcon.setImageBitmap(event.icon);
-            collapsedIcon.setImageBitmap(event.icon);
         }
         CharSequence heading = event.title == null || event.title.length() == 0
                 ? event.appLabel
@@ -355,15 +324,13 @@ public final class IslandView extends FrameLayout {
         startCycle(music ? null : event.cycle);
         ticker.removeCallbacks(tick);
         boolean hasEta = etaMillis > System.currentTimeMillis();
-        // A 44 dp strip holds two lines, so the countdown takes the body line when it has one.
+        // A 46 dp strip holds two lines, so the countdown takes the body line when it has one.
         countdownView.setVisibility(hasEta ? View.VISIBLE : View.GONE);
         textView.setVisibility(hasEta ? View.GONE : View.VISIBLE);
         if (hasEta) {
             updateCountdown();
         }
 
-        // Every card is the same 44 dp strip: icon, one title line, one body line.
-        expandedHeightDp = H_EXPANDED_DP;
         boolean karaoke =
                 startLyric(event.kind == IslandEvent.KIND_MUSIC ? event.lyric : null, event.position);
         if (music && !karaoke) {
@@ -373,17 +340,16 @@ public final class IslandView extends FrameLayout {
         }
 
         // Grow to fit the line first; only a line that still does not fit scrolls.
-        tapOpens = event.smsAddress != null;
         copyAll = joinAll(heading);
         fitWidth();
         renderBt(event.bt);
-        applyFraction(fraction);
+        applySizes();
         applyScrolling(!karaoke);
         setContentDescription(event.appLabel);
     }
 
     /**
-     * Everything the card currently shows, for the long-press copy.
+     * Everything the card currently shows, for the double-tap copy.
      *
      * <p>Heading, the visible body line and the code, each added once; a pickup card reads
      * "菜鸟驿站：1-2-3456" because the place leads and the code follows.
@@ -416,10 +382,10 @@ public final class IslandView extends FrameLayout {
         out.append(value);
     }
 
-    /** Fresh Bluetooth levels for the chips already on screen, without changing the expansion. */
+    /** Fresh Bluetooth levels for the chips already on screen, without touching the rest. */
     void setChips(java.util.List<IslandEvent.Bt> devices) {
         renderBt(devices);
-        applyFraction(fraction);
+        applySizes();
     }
 
     /** Repaints the pill after the colour or the opacity changed in the settings screen. */
@@ -429,14 +395,16 @@ public final class IslandView extends FrameLayout {
         card.invalidate();
         invalidate();
     }
-    boolean isExpanded() {
-        return expanded;
-    }
 
     void stopTicker() {
         ticker.removeCallbacks(tick);
         ticker.removeCallbacks(advance);
         ticker.removeCallbacks(lyricTick);
+        ticker.removeCallbacks(tapSoon);
+        ticker.removeCallbacks(press);
+        armed = false;
+        secondTap = false;
+        stopShake();
     }
 
     @Override
@@ -445,35 +413,144 @@ public final class IslandView extends FrameLayout {
         super.onDetachedFromWindow();
     }
 
-    void setExpanded(boolean value, boolean animate) {
-        if (animator != null) {
-            animator.cancel();
-            animator = null;
+    /**
+     * The whole touch model.
+     *
+     * <p>The card consumes the sequence ({@code true} on down) so it can tell a swipe from a tap;
+     * a clickable child, the copy chip, still wins because children get the event first. That is
+     * also why the close button is gone: it would have been a second, invisible tap target right
+     * where the swipe starts.
+     */
+    private boolean touch(View view, MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = event.getRawX();
+                downY = event.getRawY();
+                moved = false;
+                armed = false;
+                long now = SystemClock.uptimeMillis();
+                secondTap = now - lastTapAt <= DOUBLE_MS;
+                lastTapAt = now;
+                ticker.removeCallbacks(tapSoon);
+                if (secondTap) {
+                    copyCard();
+                } else {
+                    ticker.postDelayed(press, PRESS_MS);
+                }
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                float moveX = event.getRawX() - downX;
+                float moveY = event.getRawY() - downY;
+                if (!moved && (Math.abs(moveX) > dp(8) || Math.abs(moveY) > dp(8))) {
+                    moved = true;
+                    if (!armed) {
+                        // A swipe, not a press: cancel the pending shake.
+                        ticker.removeCallbacks(press);
+                    }
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                ticker.removeCallbacks(press);
+                float dx = event.getRawX() - downX;
+                float dy = event.getRawY() - downY;
+                if (armed) {
+                    armed = false;
+                    stopShake();
+                    if (-dy > dp(SWIPE_DP)) {
+                        if (actions != null) {
+                            actions.onHideFor(HIDE_MS);
+                        }
+                    }
+                    return true;
+                }
+                if (secondTap) {
+                    secondTap = false;
+                    return true;
+                }
+                if (dx < -dp(SWIPE_DP) && Math.abs(dx) > Math.abs(dy)) {
+                    if (actions != null) {
+                        actions.onDismiss();
+                    }
+                    return true;
+                }
+                if (-dy > dp(SWIPE_DP) && Math.abs(dy) > Math.abs(dx)) {
+                    if (actions != null) {
+                        actions.onNext();
+                    }
+                    return true;
+                }
+                if (!moved) {
+                    // Held back so the second tap of a double tap can cancel it.
+                    ticker.postDelayed(tapSoon, DOUBLE_MS);
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                ticker.removeCallbacks(press);
+                ticker.removeCallbacks(tapSoon);
+                armed = false;
+                secondTap = false;
+                stopShake();
+                return true;
+            default:
+                return true;
         }
-        expanded = value;
-        if (value) {
-            scheduleAdvance();
-            scheduleLyric();
-        } else {
-            ticker.removeCallbacks(advance);
-            ticker.removeCallbacks(lyricTick);
+    }
+
+    private void fireOpen() {
+        if (actions != null) {
+            actions.onOpen();
         }
-        float target = value ? 1f : 0f;
-        if (!animate) {
-            fraction = target;
-            applyFraction(target);
+    }
+
+    /**
+     * Double tap: the code when the card carries one, the visible line otherwise.
+     *
+     * <p>A card with neither (an alarm, say) copies nothing at all, which is what the person asked
+     * for: codes and the daily sentence, nothing else.
+     */
+    private void copyCard() {
+        if (actions == null) {
             return;
         }
-        animator = ValueAnimator.ofFloat(fraction, target);
-        animator.setDuration(value ? EXPAND_MS : COLLAPSE_MS);
-        animator.setInterpolator(value
-                ? new OvershootInterpolator(1.15f)
-                : new DecelerateInterpolator(1.4f));
-        animator.addUpdateListener(a -> {
-            fraction = (float) a.getAnimatedValue();
-            applyFraction(fraction);
+        String value = null;
+        if (copyValue != null && !copyValue.isEmpty()) {
+            value = copyValue;
+        } else if (textView.getVisibility() == View.VISIBLE
+                && !textView.getText().toString().trim().isEmpty()) {
+            value = textView.getText().toString().trim();
+        }
+        if (value != null) {
+            actions.onCopy(value);
+        }
+    }
+
+    /** Long press: the pill shakes so the next gesture has something to confirm it. */
+    private void arm() {
+        armed = true;
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        startShake();
+    }
+
+    private void startShake() {
+        stopShake();
+        final float amplitude = dp(4);
+        shaker = ValueAnimator.ofFloat(0f, 1f);
+        shaker.setDuration(620L);
+        shaker.setRepeatCount(ValueAnimator.INFINITE);
+        shaker.setInterpolator(new LinearInterpolator());
+        shaker.addUpdateListener(animation -> {
+            float phase = (float) animation.getAnimatedValue() * (float) Math.PI * 6f;
+            card.setTranslationX((float) Math.sin(phase) * amplitude);
         });
-        animator.start();
+        shaker.start();
+    }
+
+    private void stopShake() {
+        if (shaker != null) {
+            shaker.cancel();
+            shaker = null;
+        }
+        card.setTranslationX(0f);
     }
 
     private void updateCountdown() {
@@ -492,10 +569,9 @@ public final class IslandView extends FrameLayout {
                 alarm ? R.string.alarm_minutes_left : R.string.eta_minutes, minutes));
         ticker.removeCallbacks(tick);
         ticker.postDelayed(tick, TICK_MS);
-
     }
 
-    /** Starts rotating the extra lines (song, then artist) while the card is open. */
+    /** Starts rotating the extra lines (song, then artist) while the card is on screen. */
     private void startCycle(CharSequence[] lines) {
         ticker.removeCallbacks(advance);
         cycle = lines != null && lines.length > 1 ? lines : null;
@@ -513,13 +589,13 @@ public final class IslandView extends FrameLayout {
 
     private void scheduleAdvance() {
         ticker.removeCallbacks(advance);
-        if (cycle != null && expanded) {
+        if (cycle != null) {
             ticker.postDelayed(advance, CYCLE_MS);
         }
     }
 
     private void advanceCycle() {
-        if (cycle == null || !expanded) {
+        if (cycle == null) {
             return;
         }
         cycleIndex = (cycleIndex + 1) % cycle.length;
@@ -574,7 +650,6 @@ public final class IslandView extends FrameLayout {
             expandedBox.setPadding(dp(10), 0, dp(12), 0);
             baseWidthPx = musicMinPx;
             cardWidthPx = musicMinPx;
-            expandedRadiusDp = H_MUSIC_DP / 2f;
         } else {
             headerRow.setVisibility(View.VISIBLE);
             textView.setTextSize(13.5f);
@@ -586,7 +661,6 @@ public final class IslandView extends FrameLayout {
             expandedBox.setPadding(dp(10), 0, dp(6), 0);
             baseWidthPx = minWidthPx;
             cardWidthPx = minWidthPx;
-            expandedRadiusDp = R_EXPANDED_DP;
         }
     }
 
@@ -612,13 +686,13 @@ public final class IslandView extends FrameLayout {
 
     private void scheduleLyric() {
         ticker.removeCallbacks(lyricTick);
-        if (lyric != null && expanded) {
+        if (lyric != null) {
             ticker.postDelayed(lyricTick, LYRIC_MS);
         }
     }
 
     private void tickLyric() {
-        if (lyric == null || !expanded) {
+        if (lyric == null) {
             return;
         }
         paintLyric(lyricBase + (SystemClock.elapsedRealtime() - lyricAt));
@@ -664,23 +738,20 @@ public final class IslandView extends FrameLayout {
         textView.setText(styled);
     }
 
-    private void applyFraction(float value) {
-        // Overshoot pushes the fraction past 1, which is fine for the bounce but not for sizes.
-        float clamped = Math.max(0f, Math.min(1f, value));
+    /**
+     * Applies the one size the island has.
+     *
+     * <p>Height never changes any more; the width is whatever {@link #fitWidth()} measured, plus the
+     * chips. The corner radius stays half the height, so the card is always a pill.
+     */
+    private void applySizes() {
         ViewGroup.LayoutParams params = card.getLayoutParams();
-        params.width = Math.round(lerp(dp(W_COLLAPSED_DP), cardWidthPx, clamped));
-        params.height = Math.round(lerp(dp(H_COLLAPSED_DP), dp(expandedHeightDp), clamped));
+        params.width = cardWidthPx;
+        params.height = dp(H_DP);
         card.setLayoutParams(params);
-
-        cardBackground.setCornerRadius(lerp(dp(H_COLLAPSED_DP) / 2f, dp(expandedRadiusDp), clamped));
-
-        expandedBox.setAlpha(clamped);
-        expandedBox.setVisibility(clamped > 0.02f ? View.VISIBLE : View.INVISIBLE);
-        expandedBox.setScaleX(0.88f + 0.12f * clamped);
-        expandedBox.setScaleY(0.88f + 0.12f * clamped);
-
-        collapsedIcon.setAlpha(1f - clamped);
-        collapsedIcon.setVisibility(clamped > 0.55f ? View.INVISIBLE : View.VISIBLE);
+        cardBackground.setCornerRadius(dp(R_DP));
+        expandedBox.setVisibility(View.VISIBLE);
+        expandedBox.setAlpha(1f);
     }
 
     /**
@@ -725,7 +796,7 @@ public final class IslandView extends FrameLayout {
     private void fitWidth() {
         int chrome = musicMode
                 ? dp(10) + dp(28) + dp(10) + dp(12) + dp(6)
-                : dp(10) + dp(28) + dp(10) + dp(4) + dp(30) + dp(10);
+                : dp(10) + dp(28) + dp(10) + dp(4) + dp(6);
         int header = 0;
         if (headerRow.getVisibility() == View.VISIBLE) {
             if (tagView.getVisibility() == View.VISIBLE) {
@@ -788,7 +859,7 @@ public final class IslandView extends FrameLayout {
         chip.addView(icon, new LinearLayout.LayoutParams(dp(14), dp(14)));
         TextView percent = new TextView(getContext());
         percent.setText(device.level < 0 ? "--" : device.level + "%");
-        percent.setTextColor(device.level >= 0 && device.level <= 20 ? 0xFFF0B860 : 0xFFB9B9C2);
+        percent.setTextColor(device.level > 0 && device.level <= 20 ? 0xFFF0B860 : 0xFFB9B9C2);
         percent.setTextSize(10.5f);
         percent.setIncludeFontPadding(false);
         percent.setSingleLine(true);
@@ -797,16 +868,13 @@ public final class IslandView extends FrameLayout {
         chip.setContentDescription(device.name + " " + percent.getText());
         return chip;
     }
+
     private GradientDrawable rounded(int color, float radiusDp) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setShape(GradientDrawable.RECTANGLE);
         drawable.setColor(color);
         drawable.setCornerRadius(dp(radiusDp));
         return drawable;
-    }
-
-    private static float lerp(float from, float to, float t) {
-        return from + (to - from) * t;
     }
 
     private int dp(float value) {

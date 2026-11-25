@@ -163,6 +163,8 @@ final class BtWatcher extends BroadcastReceiver {
             Map<String, BluetoothDevice> devices = new LinkedHashMap<>();
             collect(manager, BluetoothProfile.GATT, devices);
             collect(manager, BluetoothProfile.HEADSET, devices);
+            // TWS earbuds often only register A2DP, so skipping this profile hid them entirely.
+            collect(manager, BluetoothProfile.A2DP, devices);
             BtWatcher watcher = new BtWatcher();
             watcher.load(context);
             for (BluetoothDevice device : devices.values()) {
@@ -183,6 +185,103 @@ final class BtWatcher extends BroadcastReceiver {
     /** Per-accessory switch; on unless that one device was turned off. */
     static boolean deviceOn(Context context, String address) {
         return Prefs.get(context, Prefs.KEY_BT_DEVICE + address);
+    }
+
+    /**
+     * One line per connected accessory saying where its battery figure could come from.
+     *
+     * <p>The settings screen shows this so an empty chip can be told apart from a missing permission
+     * or an accessory that publishes no level at all. Nothing is opened here: the reflection read is
+     * free, and a GATT ask would cost the accessory a link.
+     */
+    public static String probe(Context context) {
+        BluetoothManager manager;
+        try {
+            manager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+        } catch (Throwable failure) {
+            manager = null;
+        }
+        if (manager == null) {
+            return "无蓝牙服务";
+        }
+        BluetoothAdapter adapter;
+        try {
+            adapter = manager.getAdapter();
+        } catch (Throwable failure) {
+            adapter = null;
+        }
+        if (adapter == null) {
+            return "无蓝牙适配器";
+        }
+        try {
+            if (!adapter.isEnabled()) {
+                return "蓝牙已关闭";
+            }
+        } catch (Throwable failure) {
+            return "蓝牙状态不可读：缺 BLUETOOTH_CONNECT";
+        }
+        BtWatcher watcher = new BtWatcher();
+        watcher.load(context);
+        Map<String, BluetoothDevice> devices = new LinkedHashMap<>();
+        Map<String, String> via = new LinkedHashMap<>();
+        int[] profiles = {BluetoothProfile.GATT, BluetoothProfile.HEADSET, BluetoothProfile.A2DP};
+        String[] labels = {"GATT", "HEADSET", "A2DP"};
+        for (int i = 0; i < profiles.length; i++) {
+            List<BluetoothDevice> found;
+            try {
+                found = manager.getConnectedDevices(profiles[i]);
+            } catch (Throwable failure) {
+                found = null;
+            }
+            if (found == null) {
+                continue;
+            }
+            for (BluetoothDevice device : found) {
+                if (device == null) {
+                    continue;
+                }
+                String address = addressOf(device);
+                if (address.isEmpty()) {
+                    continue;
+                }
+                devices.put(address, device);
+                String previous = via.get(address);
+                via.put(address, previous == null ? labels[i] : previous + "+" + labels[i]);
+            }
+        }
+        if (devices.isEmpty()) {
+            return "蓝牙已开启，无已连接设备";
+        }
+        StringBuilder out = new StringBuilder("已连接 " + devices.size() + " 台");
+        for (BluetoothDevice device : devices.values()) {
+            String address = addressOf(device);
+            String name = watcher.nameOf(context, device, address);
+            Integer known = watcher.levels.get(address);
+            int system = reflectLevel(device);
+            out.append('\n').append(name).append(" | ").append(via.get(address))
+                    .append(" | ").append(probeType(device))
+                    .append(" | 电量 ").append(known == null || known < 0 ? "无" : known + "%")
+                    .append(" | 系统 ").append(system < 0 ? "无" : system + "%");
+        }
+        return out.toString();
+    }
+
+    /** The connection type as the diagnostics line spells it. */
+    private static String probeType(BluetoothDevice device) {
+        try {
+            switch (device.getType()) {
+                case BluetoothDevice.DEVICE_TYPE_LE:
+                    return "LE";
+                case BluetoothDevice.DEVICE_TYPE_DUAL:
+                    return "LE+经典";
+                case BluetoothDevice.DEVICE_TYPE_CLASSIC:
+                    return "经典";
+                default:
+                    return "未知";
+            }
+        } catch (Throwable failure) {
+            return "不可读";
+        }
     }
 
     /**
@@ -216,6 +315,7 @@ final class BtWatcher extends BroadcastReceiver {
         Map<String, BluetoothDevice> connected = new LinkedHashMap<>();
         collect(manager, BluetoothProfile.GATT, connected);
         collect(manager, BluetoothProfile.HEADSET, connected);
+        collect(manager, BluetoothProfile.A2DP, connected);
         if (connected.isEmpty()) {
             return null;
         }

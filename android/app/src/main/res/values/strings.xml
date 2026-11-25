@@ -3,7 +3,7 @@
     <string name="app_name">islandcn 灵动岛</string>
 
     <string name="setup_title">islandcn 灵动岛</string>
-    <string name="setup_subtitle">原生悬浮窗实现：通知到达时在状态栏下方弹出胶囊，点击展开成卡片，上滑或点 × 关闭。验证码、取件码可直接复制，外卖会显示还有几分钟。不加载网页，不需要联网。</string>
+    <string name="setup_subtitle">原生悬浮窗实现：通知到达时在状态栏下方弹出胶囊，高度固定、宽度随内容自动伸缩。单击打开应用，双击复制取件码或每日一句，左滑关掉这条消息，上滑翻看轮换中的内容，长按后上滑让它消失三分钟。验证码、取件码可直接复制，外卖会显示还有几分钟。不加载网页，不需要联网。</string>
 
     <string name="perm_overlay_title">1. 悬浮窗权限</string>
     <string name="perm_overlay_desc">用来把胶囊画在所有应用之上。</string>

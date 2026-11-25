@@ -42,7 +42,6 @@ public final class IslandService extends Service implements IslandBridge.Sink {
 
     private static final String CHANNEL_ID = "island_status";
     private static final int NOTIFICATION_ID = 42;
-    private static final long AUTO_COLLAPSE_MS = 4200L;
 
     /** The notification card and the standby pill take turns for as long as both are available. */
     private static final long FLIP_MS = 3000L;
@@ -56,10 +55,31 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private WindowManager windowManager;
     private IslandView island;
 
-    private final Runnable collapseTask = () -> {
-        if (island != null) {
-            island.setExpanded(false, true);
+    /** How long one alarm reminder holds the pill; the clock app does the ringing itself. */
+    private static final long ALARM_HOLD_MS = 5000L;
+    /** How long an upward swipe keeps the notification card in front of the lyric line. */
+    private static final long HOLD_OPEN_MS = 60_000L;
+
+    /** Moment the pill may come back after a long-press swipe hid it; 0 when it is not hidden. */
+    private long hideUntil;
+
+    /**
+     * Takes an alarm card off the pill on its own.
+     *
+     * <p>A reminder is a five second look at the clock, not a card that stays: once it is over the
+     * pill goes back to the standby line, or to the lyric line when a track is playing.
+     */
+    private final Runnable alarmTask = () -> {
+        if (current != null && current.kind == IslandEvent.KIND_ALARM) {
+            notifyCard = null;
+            hideIsland();
         }
+    };
+
+    /** Brings the pill back when the three hidden minutes are over. */
+    private final Runnable hideTask = () -> {
+        hideUntil = 0L;
+        applyPhase();
     };
 
     private PhoneWatcher phoneWatcher;
@@ -189,6 +209,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         if (!Prefs.enabled(this, event.kind)) {
             return;
         }
+        if (dropFor(event)) {
+            return;
+        }
         event.bt(chipsFor(event.kind));
         if (island == null) {
             attachOverlay();
@@ -213,10 +236,10 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             notifyHoldUntil = now + NOTIFY_HOLD_MS;
         }
         applyPhase();
-        handler.removeCallbacks(collapseTask);
-        if (musicCard == null && !(standbyHas && Prefs.opt(this, Prefs.KEY_STANDBY))) {
-            // With no standby pill to rotate with, the card folds back on its own as before.
-            handler.postDelayed(collapseTask, AUTO_COLLAPSE_MS);
+        handler.removeCallbacks(alarmTask);
+        if (event.kind == IslandEvent.KIND_ALARM) {
+            // Three reminders of five seconds each; the clock app rings at T, not us.
+            handler.postDelayed(alarmTask, ALARM_HOLD_MS);
         }
     }
 
@@ -246,7 +269,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
 
     @Override
     public void onDestroy() {
-        handler.removeCallbacks(collapseTask);
+        handler.removeCallbacks(alarmTask);
+        handler.removeCallbacks(hideTask);
         handler.removeCallbacks(flipTask);
         IslandBridge.detach(this);
         running = false;
@@ -291,6 +315,16 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             @Override
             public void onCopy(String value) {
                 copyCode(value);
+            }
+
+            @Override
+            public void onNext() {
+                nextCard();
+            }
+
+            @Override
+            public void onHideFor(long millis) {
+                hideFor(millis);
             }
         });
 
@@ -557,7 +591,101 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         });
     }
 
+    /**
+     * Whether a card should never reach the pill at all.
+     *
+     * <p>Dropping means dropping: nothing is held back and nothing is replayed when the mode ends or
+     * when the desktop comes back. A card the user swiped away is also in here, which is what makes
+     * "closed for good" survive a restart. Music is never gated: a track and its lyric line are not
+     * a notification, and the standby line has its own switches.
+     */
+    private boolean dropFor(IslandEvent event) {
+        String key = event.key;
+        if (key != null && !key.startsWith(MUSIC_KEY) && Prefs.isDismissed(this, key)) {
+            return true;
+        }
+        if (event.kind == IslandEvent.KIND_MUSIC) {
+            return false;
+        }
+        if (hideUntil > SystemClock.elapsedRealtime()) {
+            return true;
+        }
+        if (isClockApp(event.pkg)) {
+            // The clock app's own bedtime notices say what the alarm reminder already said.
+            return true;
+        }
+        if (dndOn()) {
+            return true;
+        }
+        return Perms.hasUsageAccess(this) && !StandbyView.homeInFront(this);
+    }
+
+    /** True while the system is in do-not-disturb, priority-only or silent. */
+    private boolean dndOn() {
+        try {
+            NotificationManager manager =
+                    (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+            return manager != null && manager.getCurrentInterruptionFilter()
+                    != NotificationManager.INTERRUPTION_FILTER_ALL;
+        } catch (Throwable failure) {
+            return false;
+        }
+    }
+
+    /** The clock packages whose own notices stay off the island. */
+    private static boolean isClockApp(String pkg) {
+        return pkg != null && (pkg.equals("com.android.deskclock")
+                || pkg.equals("com.miui.deskclock")
+                || pkg.contains("deskclock"));
+    }
+
+    /**
+     * Upward swipe without a long press: look at whatever else is taking turns.
+     *
+     * <p>With a track playing this hands the pill between the lyric line and the newest
+     * notification; otherwise it hands it between the notification and the standby line.
+     */
+    private void nextCard() {
+        if (island == null) {
+            return;
+        }
+        long now = SystemClock.elapsedRealtime();
+        if (musicCard != null) {
+            if (notifyHoldUntil <= now && notifyCard != null) {
+                notifyHoldUntil = now + HOLD_OPEN_MS;
+            } else {
+                notifyHoldUntil = 0L;
+            }
+            applyPhase();
+            return;
+        }
+        if (notifyCard != null && standbyHas && Prefs.opt(this, Prefs.KEY_STANDBY)) {
+            notifyShowing = !notifyShowing;
+            applyPhase();
+        }
+    }
+
+    /** Long press, then upward swipe: the pill disappears for a while and comes back by itself. */
+    private void hideFor(long millis) {
+        long span = Math.max(1000L, millis);
+        hideUntil = SystemClock.elapsedRealtime() + span;
+        handler.removeCallbacks(hideTask);
+        handler.postDelayed(hideTask, span);
+        hideIsland();
+    }
+
     private void openCurrent() {
+        if (current != null && current.kind == IslandEvent.KIND_ALARM) {
+            // No public API opens one alarm; the clock app's own list is the closest thing.
+            try {
+                Intent alarms = new Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS);
+                alarms.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(alarms);
+                return;
+            } catch (Throwable ignored) {
+                // No clock app answered; fall through to the app itself.
+            }
+        }
         IslandEvent smsTarget = current;
         if (smsTarget != null && smsTarget.smsAddress != null) {
             // Android has no public way to open one message; the conversation that holds it is the
@@ -571,10 +699,6 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             } catch (Throwable ignored) {
                 // No messaging app claimed the address; fall through to the app itself.
             }
-        }
-        handler.removeCallbacks(collapseTask);
-        if (island != null) {
-            island.setExpanded(false, true);
         }
         IslandEvent event = current;
         if (event != null && event.contentIntent != null) {
@@ -620,28 +744,38 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         } catch (Throwable ignored) {
             // The clipboard can be unavailable in restricted profiles.
         }
-        handler.removeCallbacks(collapseTask);
-        if (island != null) {
-            island.setExpanded(false, true);
-        }
     }
 
+    /**
+     * Left swipe: this card is closed for good.
+     *
+     * <p>Its key goes into the dismissed list, so the same notification can never come back — not
+     * even after the service restarts. A track is the exception: only the card on screen is dropped,
+     * because the next song should still show. An alarm also tells its watcher to skip the remaining
+     * stages of that one alarm.
+     */
     private void dismissCurrent() {
-        handler.removeCallbacks(collapseTask);
-        IslandBridge.cancel(currentKey);
-        // Closing the card by hand drops just that card: the standby pill is left alone, and the
-        // track only comes back when it actually updates again.
-        if (current != null && current.kind == IslandEvent.KIND_MUSIC) {
-            musicCard = null;
-        } else {
-            notifyCard = null;
+        IslandEvent event = current;
+        if (event != null) {
+            if (event.kind == IslandEvent.KIND_MUSIC) {
+                musicCard = null;
+            } else {
+                if (event.key != null) {
+                    Prefs.addDismissed(this, event.key);
+                }
+                notifyCard = null;
+            }
+            if (event.kind == IslandEvent.KIND_ALARM && event.key != null) {
+                AlarmWatcher.silence(this, event.key);
+            }
         }
+        IslandBridge.cancel(currentKey);
+        // The standby pill is left alone, and the track only comes back when it updates again.
         hideIsland();
     }
 
     /** Removes every card from the pill, then lets the phase machine pick what is left. */
     private void hideIsland() {
-        handler.removeCallbacks(collapseTask);
         notifyCard = null;
         notifyHoldUntil = 0L;
         notifyShowing = false;
@@ -664,11 +798,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         if (island == null) {
             return;
         }
-        if (current == event && island.getVisibility() == View.VISIBLE && island.isExpanded()) {
+        if (current == event && island.getVisibility() == View.VISIBLE) {
             return;
         }
-        boolean sameCard = current != null && event.key != null && event.key.equals(current.key)
-                && island.isExpanded();
         if (event == musicCard) {
             // The track kept playing while the card was away, so move its clock forward.
             event.position = musicPos + (SystemClock.elapsedRealtime() - musicAt);
@@ -679,9 +811,6 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             island.setVisibility(View.VISIBLE);
         }
         island.bind(event);
-        if (!sameCard) {
-            island.setExpanded(true, true);
-        }
     }
 
     /**
@@ -722,6 +851,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
      */
     private void applyStandbyVisibility() {
         boolean show = Prefs.opt(this, Prefs.KEY_STANDBY) && standbyHas && standbyHome
+                && hideUntil <= SystemClock.elapsedRealtime()
                 && musicCard == null && (notifyCard == null || !notifyShowing);
         if (!show) {
             if (standby != null) {

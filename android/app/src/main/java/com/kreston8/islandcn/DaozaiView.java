@@ -120,7 +120,7 @@ final class DaozaiView extends View {
             for (int side = -1; side <= 1; side += 2) {
                 float left = cx + side * gap / 2f - halfWidth;
                 box.set(left, cy - height * 0.55f, left + halfWidth * 2f, cy + height * 0.75f);
-                canvas.drawArc(box, 25f, 130f, false, paint);
+                canvas.drawArc(box, 205f, 130f, false, paint);
             }
         } else {
             float halfWidth = size * 0.085f;

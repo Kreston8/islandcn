@@ -3,8 +3,8 @@
 English | [中文说明](README.zh.md)
 
 Upstream islandcn is a Next.js site plus a shadcn registry, not a native app. This folder is a
-native Android app that borrows the look of the island: a black pill sits at the top of the screen,
-springs open when a notification arrives, and collapses on its own.
+native Android app that borrows the look of the island: a black pill sits at the top of the screen at a
+fixed height, and only its width follows the content.
 
 It replaced an earlier WebView shell. Nothing here loads a web page. Two optional HTTPS lookups
 exist — per-line lyrics and a temperature — and both are described below with their limits.
@@ -23,23 +23,23 @@ application, the rest by their own sources.
 | 待办 | notification from 小米笔记 / a notes app | tag + the todo text |
 | 来电 | call state callback | tag + 号码 / 未知号码，tap 打开拨号盘 |
 | 闹钟 | next clock alarm, 15 min ahead | tag + 07:30 + 还有 N 分钟响铃 |
-| 音乐 | a playing media session, shown only while the launcher is in front | 44 dp strip: album art + one lyric line, lit character by character |
+| 音乐 | a playing media session, shown only while the launcher is in front | 46 dp strip: album art + one lyric line, lit character by character |
 
 Plain notifications, verification codes and navigation are not shown at all any more — they were
 removed on request, so that an app which is not one of the eight above cannot interrupt anything.
 
-Every card expands to the same 46 dp strip: one icon, one bold line, one body line. The icon is the
-notifying app's own — its large icon first (WeChat and QQ put the contact's avatar there), then a
-`Person` avatar from a `MessagingStyle` notification, then the launcher icon, then the small icon — so a
-card says which app it came from. Two lines are all that height holds, so the copyable code moved into
-the title row and a live countdown replaces the body line instead of adding a third one. The pill starts
-at 250 dp, widens until the sentence fits up to the screen edge, and only past that scrolls a marquee;
-the lyric line is exempt because the per-character highlight owns it.
+Every card is the same fixed 46 dp height and only its width follows the content: one icon, one bold
+line, one body line. The icon is the notifying app's own — its large icon first (WeChat and QQ put the
+contact's avatar there), then a `Person` avatar from a `MessagingStyle` notification, then the launcher
+icon, then the small icon — so a card says which app it came from. Two lines are all that height holds,
+so the copyable code moved into the title row and a live countdown replaces the body line instead of
+adding a third one. The pill starts at 250 dp, widens until the sentence fits up to the screen edge, and
+only past that scrolls a marquee; the lyric line is exempt because the per-character highlight owns it.
 
-The code rows copy to the clipboard and collapse the island; the notification itself is left in the
-shade so the copy is never destructive. A long press anywhere on the card copies everything it shows as
-one string — heading, body and code, `菜鸟驿站：1-2-3456` — which is also the quickest way to grab a
-code off the collapsed pill.
+A double tap copies just the pickup code — `1-2-3456`, without the `菜鸟驿站：` prefix; the notification
+itself is left in the shade, so the copy is never destructive. A swipe left closes that message for good:
+the same notification never returns to the island, not even after the service restarts, and on an alarm
+card it also cancels the reminder slots of that alarm which have not been shown yet.
 
 ### Bluetooth battery chips
 
@@ -83,10 +83,9 @@ the items you enabled:
   days-since-epoch × 7 mod 30, so it lands on a different line every day instead of walking the list.
 - **蓝牙电量** — the same accessory percentages as the chips, read through the passive path only: the
   standby pill never opens a GATT connection, so its 4-second refresh cannot disturb a headset.
-- **Long press to copy** — not just readable: a long press on the pill copies the lines it is drawing,
-  in that order, joined with ` · `, so a pill showing only 每日一句 copies that sentence and nothing
-  else. The pickup-code card works the same way for 驿站名：取件码, while the copy button inside the
-  card gives the bare code.
+- **Double tap to copy** — a double tap on the standby pill copies only the 每日一句 sentence; a
+  double tap on a pickup-code card copies only the bare code, without the 驿站名： prefix. No other
+  card copies anything.
 
 The five items sit one per row — switch, name, 上移, 下移 — under the master switch, so hiding an item
 never needs a reorder. While a notification card exists as well the two swap every 3 seconds, and
@@ -128,10 +127,10 @@ is a live preview.
   (`IslandListener.NAV_PACKAGES`) is no longer consulted, because 导航 was removed on request.
 - `ContentParser` (`ContentParser.java`) is the classifier: keyword plus regular expression matching
   for codes, pickup numbers and delivery ETAs.
-- `IslandView` draws the pill and the expanded card with plain platform views, cross-fading the
-  content while the corner radius interpolates from a pill to a card. `OvershootInterpolator` gives
-  the spring. Every card is the same 44 dp strip, which is why a copyable code sits in the title row
-  and a countdown takes over the body line.
+- `IslandView` draws one pill and nothing else with plain platform views: a fixed 46 dp height whose
+  width is re-measured per card, so a long delivery line makes it wider and a short code narrower.
+  `OvershootInterpolator` gives the spring when the width changes. That height holds two lines, which
+  is why a copyable code sits in the title row and a countdown takes over the body line.
 - `BtWatcher` (`BtWatcher.java`) is the battery reading, in three steps: the hidden
   `BluetoothDevice.getBatteryLevel()` (the same number Settings prints), then the hidden
   `BATTERY_LEVEL_CHANGED` broadcast, then a GATT read of the standard battery service
@@ -181,14 +180,36 @@ is a live preview.
   position" by binary search; `LyricSource` does the one HTTPS lookup per track with a 6 s timeout,
   a 512 KB cap and a 16 entry memory-only cache.
 
-Behaviour: tap the pill to expand, tap the card to open the notification's app, swipe up or tap the
-cross to dismiss (which cancels the notification), auto collapse after 4.2 s, and removing the
-notification from the shade hides the island.
+Behaviour: the pill has one shape only — a 46 dp capsule just below the status bar, centred, whose
+width follows what it holds, so a delivery card is long and a pickup code short. Nothing expands and
+nothing collapses.
 
-The music card is the exception to the 4.2 s collapse: it stays open so the karaoke line keeps
-ticking, and it goes away only when the track stops, when you swipe it off, or when another app
-comes to the front. Returning to the desktop brings it straight back: the foreground answer is
-cached, because `UsageEvents` reports *changes*, so an empty window means "nothing moved", not
+- **Single tap** opens what the card stands for: the alarm card opens the clock's alarm list, a pickup
+  card opens that SMS conversation.
+- **Double tap** copies, and only for two things: a pickup code (the code alone, without the 驿站名：
+  prefix) and the standby pill's 每日一句 (that sentence alone). Every other card ignores it.
+- **Swipe left** closes that one message for good — the same notification never comes back to the
+  island, not even after the service restarts. The music card is the only exception: the current
+  track is dropped, the next one still shows up. On an alarm card the same swipe also cancels the
+  reminder slots of that alarm which have not been shown yet.
+- **Swipe up, no long press** cycles what is rotating: several pickup codes or notifications, a
+  notification and the standby pill, and the lyric line and a notification while a track plays.
+- **Long press, then swipe up** hides the island for 3 minutes; it comes back on its own.
+- **免打扰 / 仅优先 / 静音** keeps notifications, pickup codes, delivery, todos, calls and alarms off
+  the island entirely. The standby pill and the lyric line are unaffected, and nothing that was held
+  back pops up when the mode ends.
+- A card that arrives while another app is in front is dropped rather than queued, and it is not
+  replayed on the way back to the launcher either. That is the usage-access rule; without the grant
+  the earlier behaviour returns and a card pops over any screen.
+- Notifications the Xiaomi clock app posts itself (作息提醒 / 该睡觉了) never reach the island.
+- An alarm reminds at T-10, T-5 and T-1 minutes, five seconds each, then the standby pill comes back
+  — or the lyric line straight away, if a track is playing. Nothing after T; the system alarm rings
+  by itself.
+
+Removing the notification from the shade still hides the island. The music card never times out: it
+keeps the karaoke line ticking, and it goes away only when the track stops, when you swipe it off, or
+when another app comes to the front. Returning to the desktop brings it straight back: the foreground
+answer is cached, because `UsageEvents` reports *changes*, so an empty window means "nothing moved", not
 "nothing is in front" — treating it as the latter hid the card a few seconds after it appeared.
 The line itself is kept honest by trusting the player only as far as it is trustworthy: the
 position is extrapolated while `getLastPositionUpdateTime()` is plausible, the card re-anchors
