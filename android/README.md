@@ -70,7 +70,15 @@ cross to dismiss (which cancels the notification), auto collapse after 4.2 s, an
 notification from the shade hides the island.
 
 The music card is the exception to the 4.2 s collapse: it stays open so the karaoke line keeps
-ticking, and it disappears by itself the moment you open any app or pause the track.
+ticking, and it goes away only when the track stops, when you swipe it off, or when another app
+comes to the front. Returning to the desktop brings it straight back: the foreground answer is
+cached, because `UsageEvents` reports *changes*, so an empty window means "nothing moved", not
+"nothing is in front" — treating it as the latter hid the card a few seconds after it appeared.
+The line itself is kept honest by trusting the player only as far as it is trustworthy: the
+position is extrapolated while `getLastPositionUpdateTime()` is plausible, the card re-anchors
+when the reported position drifts more than 700 ms from the running estimate, LRC `[offset:±ms]`
+tags are applied, and a lyric whose total length is far from the track duration (a different
+recording) is dropped instead of shown out of sync.
 
 ## Permissions the user has to grant
 

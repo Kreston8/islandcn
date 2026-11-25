@@ -41,7 +41,14 @@ final class MediaWatcher {
 
     private static final long POLL_MS = 2500L;
     /** Small window: we only need the most recent foreground change. */
+    /** Small window: we only need the most recent foreground change. */
     private static final long WINDOW_MS = 8000L;
+    /** The first look after start needs history, because a resting desktop emits no events at all. */
+    private static final long PRIME_MS = 120_000L;
+    /** How far the player's own clock may drift before the strip is re-anchored. */
+    private static final long DRIFT_MS = 700L;
+    /** A playback-state stamp older than this is not a usable clock. */
+    private static final long MAX_EXTRAPOLATE_MS = 120_000L;
 
     private final Context context;
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -63,6 +70,9 @@ final class MediaWatcher {
     private String lyricKey;
     private Lyric lyric;
     private Set<String> homePackages;
+    private String lastForeground;
+    private long anchorPos;
+    private long anchorAt;
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -232,6 +242,8 @@ final class MediaWatcher {
         CharSequence artist = metadata.getText(MediaMetadata.METADATA_KEY_ARTIST);
         String track = (title == null ? "" : title.toString()) + '|' + (artist == null ? "" : artist.toString());
         if (shown && track.equals(lastTrack)) {
+            // The strip stays up; this only checks that its karaoke clock still matches the player.
+            resync(active);
             schedulePoll();
             return;
         }
@@ -247,7 +259,10 @@ final class MediaWatcher {
         }
         String song = title == null ? "" : title.toString();
         String singer = artist == null ? "" : artist.toString();
-        card.lyric(lyricFor(LyricSource.keyOf(song, singer), song, singer), positionOf(active));
+        long position = positionOf(active);
+        card.lyric(lyricFor(LyricSource.keyOf(song, singer), song, singer), position);
+        anchorPos = position;
+        anchorAt = SystemClock.elapsedRealtime();
         shown = true;
         shownKey = card.key;
         lastTrack = track;
@@ -264,6 +279,7 @@ final class MediaWatcher {
         lastTrack = null;
         lyricKey = null;
         lyric = null;
+        anchorAt = 0L;
     }
 
     private void schedulePoll() {
@@ -297,28 +313,79 @@ final class MediaWatcher {
     }
 
     private void onLyric(String key, Lyric found) {
-        if (!key.equals(lyricKey) || !shown || found == null || found.isEmpty()) {
+        if (!key.equals(lyricKey) || !shown) {
             // A late answer, or the track changed while the request was in flight.
             return;
         }
-        lyric = found;
+        lyric = plausible(found) ? found : Lyric.empty();
         // Force exactly one re-post; the card key is unchanged so nothing re-expands.
         lastTrack = null;
         refresh();
     }
 
-    /** Where the player is right now, in ms, extrapolated from its last state update. */
+    /**
+     * Where the player is right now, in ms.
+     *
+     * <p>The position is only extrapolated when the state carries a plausible update stamp: several
+     * players leave it at 0, and adding the whole uptime to that would put the lyric minutes off.
+     */
     private long positionOf(MediaController active) {
         PlaybackState state = active.getPlaybackState();
         if (state == null) {
             return 0L;
         }
         long position = Math.max(0L, state.getPosition());
-        if (state.getState() == PlaybackState.STATE_PLAYING) {
-            position += Math.max(0L,
-                    SystemClock.elapsedRealtime() - state.getLastPositionUpdateTime());
+        long stamp = state.getLastPositionUpdateTime();
+        long now = SystemClock.elapsedRealtime();
+        if (state.getState() == PlaybackState.STATE_PLAYING
+                && stamp > 0L && stamp <= now && now - stamp < MAX_EXTRAPOLATE_MS) {
+            position += now - stamp;
         }
         return position;
+    }
+
+    /**
+     * Re-anchors the karaoke line when the player's own clock no longer matches what the strip has
+     * been counting up, which is what makes a lazy player drift several seconds behind.
+     */
+    private void resync(MediaController active) {
+        if (anchorAt == 0L) {
+            return;
+        }
+        PlaybackState state = active.getPlaybackState();
+        if (state == null || state.getLastPositionUpdateTime() <= 0L) {
+            // No trustworthy clock to compare against, so the raw position stays authoritative.
+            return;
+        }
+        long expected = anchorPos + (SystemClock.elapsedRealtime() - anchorAt);
+        if (Math.abs(positionOf(active) - expected) > DRIFT_MS) {
+            // One re-post with the fresh position; the card key is unchanged so it does not reopen.
+            lastTrack = null;
+            refresh();
+        }
+    }
+
+    /** Length of the current track in ms, or 0 when the player does not publish it. */
+    private long trackDuration() {
+        MediaController active = controller;
+        MediaMetadata metadata = active == null ? null : active.getMetadata();
+        return metadata == null ? 0L : metadata.getLong(MediaMetadata.METADATA_KEY_DURATION);
+    }
+
+    /**
+     * A lyric whose total length is wildly off the track's came from another recording (a live take,
+     * a cover, a remix), and would stay out of step for the whole song.
+     */
+    private boolean plausible(Lyric candidate) {
+        if (candidate == null || candidate.isEmpty()) {
+            return false;
+        }
+        long track = trackDuration();
+        long lyricEnd = candidate.duration();
+        if (track <= 0L || lyricEnd <= 0L) {
+            return true;
+        }
+        return Math.abs(lyricEnd - track) <= Math.max(15_000L, track / 8L);
     }
 
     private boolean hasUsageAccess() {
@@ -335,8 +402,13 @@ final class MediaWatcher {
         }
     }
 
-    /** True when the player itself is the app the user is looking at. */
-    /** True when the launcher, that is the desktop, is the app in front. */
+    /**
+     * True when the launcher, that is the desktop, is the app in front.
+     *
+     * <p>{@code UsageEvents} only report switches. A window without events means "nothing changed",
+     * not "nothing is in front", so the last known foreground is cached: the first call primes it
+     * with a wide window and later calls only move it forward.
+     */
     private boolean isHomeForeground() {
         if (!hasUsageAccess()) {
             return false;
@@ -351,29 +423,34 @@ final class MediaWatcher {
             return false;
         }
         long now = System.currentTimeMillis();
-        UsageEvents events;
-        try {
-            events = usage.queryEvents(now - WINDOW_MS, now);
-        } catch (Throwable ignored) {
-            return false;
-        }
-        if (events == null) {
-            return false;
-        }
         String latest = null;
         try {
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event);
-                int type = event.getEventType();
-                if (type == UsageEvents.Event.MOVE_TO_FOREGROUND
-                        || type == UsageEvents.Event.ACTIVITY_RESUMED) {
-                    latest = event.getPackageName();
+            long since = lastForeground == null ? PRIME_MS : WINDOW_MS;
+            UsageEvents events = usage.queryEvents(now - since, now);
+            if (events != null) {
+                while (events.hasNextEvent()) {
+                    events.getNextEvent(event);
+                    int type = event.getEventType();
+                    if (type == UsageEvents.Event.MOVE_TO_FOREGROUND
+                            || type == UsageEvents.Event.ACTIVITY_RESUMED) {
+                        String name = event.getPackageName();
+                        if (name != null) {
+                            latest = name;
+                        }
+                    }
                 }
             }
         } catch (Throwable ignored) {
-            return false;
+            // Keep whatever was cached before.
         }
-        return latest != null && homePackages().contains(latest);
+        if (latest != null) {
+            lastForeground = latest;
+        }
+        if (lastForeground == null) {
+            // Nothing to go on at all, and hiding forever is worse than showing over an app.
+            return true;
+        }
+        return homePackages().contains(lastForeground);
     }
 
     /** Every package that can act as HOME; MIUI images usually resolve more than one. */

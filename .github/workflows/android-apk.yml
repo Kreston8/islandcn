@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-            -PversionName="2.4.${{ github.run_number }}"
+            -PversionName="2.5.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-             "dist/islandcn-island-2.4.${{ github.run_number }}.apk"
+             "dist/islandcn-island-2.5.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,13 +97,51 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.4.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.5.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
-          Native overlay island for Android: a SYSTEM_ALERT_WINDOW pill above other apps driven by a NotificationListenerService. SMS verification and pickup codes with one tap copy, delivery countdown, Mi Notes todo cards, incoming calls, a fifteen minute alarm heads up, navigation lines from whitelisted map apps, and a music strip. Every feature has its own switch in the app.
+          ## English
 
-          This build: the music card is half the height of a normal card (44 dp) and shows only album art plus one line, which lights up character by character as the song is sung. It only appears on the desktop and disappears the moment any app opens, the player included. It also pins the release certificate, so later builds install straight over this one; as the first build with the new key it still needs one uninstall of 2.3.x.
+          A native dynamic-island overlay for Android, drawn with SYSTEM_ALERT_WINDOW on top of other apps and driven by a NotificationListenerService. SMS verification and parcel pickup codes with one-tap copy, food-delivery countdown, Mi Notes to-do cards, incoming calls, a 15-minute alarm heads-up, navigation lines from whitelisted map apps, and a compact half-height music strip with karaoke lyrics. Every feature has its own switch in the app.
 
-          Honest note about the network: the lyric line is the only feature that opens a socket. It calls the public lyrics endpoint on music.163.com over HTTPS, once per track, only while the lyrics switch is on, capped at 512 KB and kept in memory only. That endpoint has one timestamp per line, so the per character highlight is interpolated inside the line and will not match every syllable. Turning the switch off removes the network use completely.
+          **Supported systems and devices**
+          - Android 8.0 (API 26) and newer; compiled against Android 14 (API 34). Not a system app: no root, no Xposed, no ADB required.
+          - Primary target: Xiaomi / Redmi / POCO on MIUI 12-14 or HyperOS (Android 11-14). MIUI additionally requires 后台弹出界面 ("show on screen while in background"), otherwise the system silently drops overlays raised from the background.
+          - Other skins (ColorOS, OriginOS, One UI, plain AOSP) run the basic cards, but aggressive background limits can kill the listener; add the app to the battery-optimisation whitelist.
+          - Music strip: 网易云音乐 (com.netease.cloudmusic) is the reference player. Any player that publishes a MediaSession shows title and artist, but the lyric lookup only covers the NetEase catalogue, matched by song title plus artist.
+
+          **What is new in this build**
+          - **The strip no longer disappears after a few seconds.** It now stays for as long as a track is playing while you are on the desktop, until you dismiss it by hand. Before, an empty foreground-event window was read as "an app is in front", which hid the card roughly three seconds after it appeared.
+          - **Lyric sync is fixed.** The playback position is extrapolated only while the player reports a usable timestamp; the card re-anchors when the reported position drifts more than 0.7 s from the running estimate; LRC `[offset:±ms]` tags are applied; and a lyric whose total length is far off the track duration (a different recording) is dropped instead of played out of sync.
+          - Still desktop-only: opening any app, the player included, hides the strip, and returning to the launcher brings it back on the right line.
+          - Signed with the pinned release key, so it installs straight over 2.4.10. Coming from 2.3.x still needs one uninstall.
+
+          **Honest limits**
+          - The lyric line is the only feature that opens a socket: HTTPS to music.163.com, once per track, only while the lyrics switch is on, 6 s timeout, 512 KB cap, memory-only cache. Turning that switch off removes the network use completely; the app has no other outbound traffic.
+          - That endpoint carries one timestamp per line, so the character-by-character highlight is interpolated inside the line and will not match every syllable.
+          - The desktop-only rule needs Usage access; without it the strip is hidden rather than shown over apps.
+          - On Android 12+ the incoming-call card shows 未知号码: the caller id is no longer shared with third-party apps.
+
+          ## 中文
+
+          一个原生实现的安卓「灵动岛」：用 SYSTEM_ALERT_WINDOW 浮在其他应用之上，内容由 NotificationListenerService 驱动。短信验证码、取件码一键复制，外卖送达倒计时，小米笔记待办卡片，来电，提前 15 分钟的闹钟提醒，白名单地图应用的导航提示，以及半高紧凑、逐字高亮歌词的音乐条。每个功能都有独立开关。
+
+          **支持的系统与机型**
+          - Android 8.0（API 26）及以上，编译目标 Android 14（API 34）。不是系统应用：不需要 root、不需要 Xposed、不需要连电脑。
+          - 主要适配：小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS（Android 11–14）。MIUI 上必须额外开启「后台弹出界面」，否则系统会静默拦截后台发起的悬浮窗。
+          - 其他系统（ColorOS、OriginOS、One UI、原生安卓）基础卡片可以正常用，但激进的后台限制可能杀掉监听服务，建议把本应用加入电池优化白名单。
+          - 音乐条：以网易云音乐（com.netease.cloudmusic）为基准播放器。任何发布 MediaSession 的播放器都能显示歌名和歌手，但歌词查询只覆盖网易云曲库，按歌名 + 歌手匹配。
+
+          **本次更新**
+          - **不再几秒后自动消失。** 只要音乐在播放且停留在桌面，灵动岛就持续显示，直到你手动划掉。之前把「前台事件窗口为空」误判成「有应用在前台」，所以卡片出现约 3 秒就被隐藏。
+          - **歌词进度已校正。** 只有播放器上报了可用的时间戳才做位置外推；上报位置与估算位置偏差超过 0.7 秒时重新对齐；支持 LRC 的 `[offset:±ms]` 整体偏移；总时长与曲目相差过大的歌词（不同录音版本）直接丢弃，不再错着往下走。
+          - 仍然只在桌面显示：打开任何应用（包括播放器本身）就隐藏，回到桌面立刻带正确的那句歌词回来。
+          - 使用固定签名证书，可直接覆盖 2.4.10 安装；从 2.3.x 升级仍需卸载一次。
+
+          **如实说明的限制**
+          - 唯一会联网的是歌词：HTTPS 访问 music.163.com，每首歌一次，仅在「联网歌词」开关打开时，6 秒超时、512 KB 上限、只放内存缓存。关掉该开关即无任何网络行为，应用没有其他外发流量。
+          - 该接口每行只有一个时间戳，逐字高亮是在行内插值推出来的，不会和每个字完全贴合。
+          - 只在桌面显示依赖「使用情况访问」权限；未授权时宁可不显示，也不会压在应用上面。
+          - Android 12 及以上，来电卡片显示「未知号码」：系统不再向第三方应用开放来电号码。
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

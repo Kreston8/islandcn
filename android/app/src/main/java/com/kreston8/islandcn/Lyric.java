@@ -15,6 +15,9 @@ import java.util.regex.Pattern;
  */
 final class Lyric {
 
+    /** {@code [offset:±ms]}, which shifts every timestamp in the document. */
+    private static final Pattern OFFSET = Pattern.compile("\\[offset:\\s*([+-]?\\d{1,7})\\s*\\]");
+
     /** {@code [mm:ss.xx]} or {@code [mm:ss]}, possibly several per line. */
     private static final Pattern STAMP =
             Pattern.compile("\\[(\\d{1,3}):(\\d{1,2})(?:[.:](\\d{1,3}))?\\]");
@@ -74,6 +77,11 @@ final class Lyric {
         return times[index] + 4000L;
     }
 
+    /** Nominal playing time of the whole lyric, used to spot one taken from another recording. */
+    long duration() {
+        return lines.length == 0 ? 0L : endAt(lines.length - 1);
+    }
+
     /** Parses an LRC document; returns {@link #empty()} when nothing usable is in it. */
     static Lyric parse(String lrc) {
         if (lrc == null || lrc.isEmpty()) {
@@ -115,13 +123,28 @@ final class Lyric {
                 return Long.compare(left[0], right[0]);
             }
         });
+        // A global [offset:±ms] shifts the whole clock; positive means sing earlier.
+        long shift = offsetOf(lrc);
         String[] lines = new String[stamps.size()];
         long[] times = new long[stamps.size()];
         for (int i = 0; i < stamps.size(); i++) {
             lines[i] = texts.get((int) stamps.get(i)[1]);
-            times[i] = stamps.get(i)[0];
+            times[i] = Math.max(0L, stamps.get(i)[0] - shift);
         }
         return new Lyric(lines, times);
+    }
+
+    /** The document's global {@code [offset:±ms]} tag, or 0 when it has none. */
+    private static long offsetOf(String lrc) {
+        Matcher matcher = OFFSET.matcher(lrc);
+        if (!matcher.find()) {
+            return 0L;
+        }
+        try {
+            return Long.parseLong(matcher.group(1));
+        } catch (NumberFormatException ignored) {
+            return 0L;
+        }
     }
 
     private static long toMillis(Matcher matcher) {
