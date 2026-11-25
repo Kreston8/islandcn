@@ -24,6 +24,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
@@ -145,8 +146,8 @@ final class StandbyView extends FrameLayout {
                 if (!quoteOn || quote.isEmpty()) {
                     continue;
                 }
-                TextView line = label(quote, 0xFFC6C6CE, 12.5f, false);
-                line.setMaxWidth(dp(230));
+                TextView line = label(quote, 0xFFC6C6CE, 15f, false);
+                line.setMaxWidth(dp(260));
                 line.setSingleLine(true);
                 line.setEllipsize(TextUtils.TruncateAt.END);
                 row.addView(line, margin());
@@ -305,6 +306,12 @@ final class StandbyView extends FrameLayout {
         private static Reading cache;
         private static long at;
         private static boolean busy;
+        /** What the last request did and when, so a failure can be shown instead of guessed at. */
+        private static String status = "";
+        private static long statusAt;
+        /** Nothing is asked again before this moment after a failure. */
+        private static long retryAt;
+        private static final long FAIL_MS = 90_000L;
 
         private Weather() {
         }
@@ -323,6 +330,9 @@ final class StandbyView extends FrameLayout {
 
         static Reading snapshot(Context context, String name, Runnable done) {
             if (name == null || name.trim().isEmpty()) {
+                status = context.getString(R.string.weather_state_nocity);
+                statusAt = 0L;
+                retryAt = 0L;
                 return null;
             }
             String wanted = name.trim();
@@ -331,8 +341,17 @@ final class StandbyView extends FrameLayout {
                 city = wanted;
                 cache = null;
                 at = 0L;
+                retryAt = 0L;
+                status = "";
+                statusAt = 0L;
             }
-            if (cache != null && System.currentTimeMillis() - at < TTL_MS) {
+            long now = System.currentTimeMillis();
+            if (cache != null && now - at < TTL_MS) {
+                return cache;
+            }
+            if (now < retryAt) {
+                // The pill refreshes every four seconds, so a failed request needs a quiet period
+                // instead of hammering an endpoint that just said no.
                 return cache;
             }
             fetch(context, wanted, done);
@@ -347,9 +366,11 @@ final class StandbyView extends FrameLayout {
             Thread worker = new Thread(() -> {
                 Reading value = null;
                 try {
-                    value = request(wanted);
-                } catch (Throwable ignored) {
-                    // Offline, blocked, or the endpoint changed shape: the items just stay hidden.
+                    value = request(context, wanted);
+                } catch (Throwable failure) {
+                    // Offline or blocked: remember why, and stay off the network for a while.
+                    mark(context, context.getString(R.string.weather_err_network,
+                            "open-meteo.com", reason(failure)), false);
                 }
                 final Reading result = value;
                 busy = false;
@@ -367,31 +388,33 @@ final class StandbyView extends FrameLayout {
             worker.start();
         }
 
-        private static Reading request(String name) {
+        private static Reading request(Context context, String name) {
             JSONObject found;
             try {
                 found = new JSONObject(read(
                         "https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&format=json&name="
                                 + encode(name)));
             } catch (Exception failure) {
+                mark(context, context.getString(R.string.weather_err_network,
+                        "geocoding-api.open-meteo.com", reason(failure)), false);
                 return null;
             }
             JSONArray results = found.optJSONArray("results");
-            if (results == null || results.length() == 0) {
-                return null;
-            }
-            JSONObject place = results.optJSONObject(0);
+            JSONObject place = results == null || results.length() == 0 ? null : results.optJSONObject(0);
             if (place == null) {
+                mark(context, context.getString(R.string.weather_err_place, name), false);
                 return null;
             }
             double latitude = place.optDouble("latitude", Double.NaN);
             double longitude = place.optDouble("longitude", Double.NaN);
             if (Double.isNaN(latitude) || Double.isNaN(longitude)) {
+                mark(context, context.getString(R.string.weather_err_place, name), false);
                 return null;
             }
 
             String temperature = null;
             int code = -1;
+            String forecastError = null;
             try {
                 JSONObject forecast = new JSONObject(read(
                         "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code"
@@ -401,8 +424,8 @@ final class StandbyView extends FrameLayout {
                     temperature = Math.round(current.optDouble("temperature_2m", 0d)) + "\u00b0";
                     code = current.optInt("weather_code", -1);
                 }
-            } catch (Exception ignored) {
-                // The temperature is optional; the air quality below can still succeed.
+            } catch (Exception failure) {
+                forecastError = reason(failure);
             }
 
             String air = null;
@@ -415,23 +438,89 @@ final class StandbyView extends FrameLayout {
                     air = String.valueOf(Math.round(current.optDouble("us_aqi", 0d)));
                 }
             } catch (Exception ignored) {
-                // Same here: a missing AQI only hides one chip.
+                // A missing AQI only hides one chip.
             }
 
             if (temperature == null && air == null) {
+                mark(context, forecastError == null
+                                ? context.getString(R.string.weather_err_empty)
+                                : context.getString(R.string.weather_err_network,
+                                "api.open-meteo.com", forecastError),
+                        false);
                 return null;
             }
+            mark(context, context.getString(R.string.weather_ok_fmt,
+                    temperature == null ? "-" : temperature,
+                    air == null ? "-" : air), true);
             return new Reading(temperature, code, air);
         }
 
-        private static String read(String address) throws Exception {
+        /** What a thrown failure says, or a dash when it says nothing. */
+        private static String reason(Throwable failure) {
+            String message = failure == null ? null : failure.getMessage();
+            return message == null || message.isEmpty() ? "?" : message;
+        }
+
+        /** Records the outcome and, after a failure, the moment the next attempt is allowed. */
+        private static void mark(Context context, String message, boolean ok) {
+            status = message;
+            statusAt = System.currentTimeMillis();
+            retryAt = ok ? 0L : statusAt + FAIL_MS;
+        }
+
+        /**
+         * One line for the settings screen: what the last request did, how long ago, or why nothing
+         * is drawn at all. A failed request used to leave no trace anywhere, which made a wrong city
+         * name look exactly like a broken feature.
+         */
+        static String statusText(Context context) {
+            String saved = Prefs.text(context, Prefs.KEY_CITY).trim();
+            if (saved.isEmpty()) {
+                return context.getString(R.string.weather_state_nocity);
+            }
+            if (status == null || status.isEmpty() || statusAt <= 0L) {
+                return context.getString(R.string.weather_state_wait);
+            }
+            long ago = Math.max(0L, (System.currentTimeMillis() - statusAt) / 1000L);
+            return context.getString(R.string.weather_state_ago, status, (int) Math.min(ago, 9999L));
+        }
+
+        /**
+         * One request on the calling thread, for the "test now" button: the answer is the raw status
+         * line, so a misspelt city and a blocked network finally look different.
+         */
+        static String probe(Context context, String name) {
+            if (name == null || name.trim().isEmpty()) {
+                return context.getString(R.string.weather_state_nocity);
+            }
+            String wanted = name.trim();
+            Reading value = null;
+            try {
+                value = request(context, wanted);
+            } catch (Throwable failure) {
+                mark(context, context.getString(R.string.weather_err_network,
+                        "open-meteo.com", reason(failure)), false);
+            }
+            if (value != null) {
+                city = wanted;
+                cache = value;
+                at = System.currentTimeMillis();
+            }
+            return status == null || status.isEmpty()
+                    ? context.getString(R.string.weather_err_empty) : status;
+        }
+
+        private static String read(String address) throws IOException {
             HttpURLConnection connection = (HttpURLConnection) new URL(address).openConnection();
             try {
                 connection.setConnectTimeout(TIMEOUT_MS);
                 connection.setReadTimeout(TIMEOUT_MS);
                 connection.setRequestProperty("Accept", "application/json");
-                if (connection.getResponseCode() / 100 != 2) {
-                    return "";
+                int code = connection.getResponseCode();
+                if (code / 100 != 2) {
+                    // Handing an empty body to JSONObject only says "no value", which hides the
+                    // reason (a blocked host, a rate limit); a status code names it.
+                    throw new IOException("HTTP " + code);
                 }
                 InputStream in = connection.getInputStream();
                 ByteArrayOutputStream out = new ByteArrayOutputStream();

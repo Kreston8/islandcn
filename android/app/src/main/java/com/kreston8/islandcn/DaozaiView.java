@@ -7,23 +7,27 @@ import android.graphics.RectF;
 import android.view.View;
 
 /**
- * The little mascot on the standby pill.
+ * The two eyes on the standby pill.
  *
- * <p>A face drawn by hand instead of an image, because it has to move: it breathes, blinks every few
- * seconds and sways a few degrees either way. Drawing it costs one Canvas pass on a 24 dp square at
- * 25 frames per second, and only while the pill is actually visible; the service pauses the pill
- * whenever it is covered, so a launcher in the background costs nothing.
+ * <p>Deliberately nothing else: no head, no cheeks, no mouth and no colour. The pill underneath is
+ * black, so any painted "face" would either be invisible or turn the pill into a coloured blob. Two
+ * light eyes read the same way as the assistant mascot they are modelled on, and they cost one
+ * Canvas pass on a 24 dp square at 25 frames per second, only while the pill is actually visible.
  *
- * <p>The animation is computed from a clock rather than from an animator chain: every frame is a
- * pure function of elapsed time, which means a dropped frame never shifts the rhythm.
+ * <p>Two moods are drawn: wide round eyes and smiling crescent eyes. The mood is picked by hashing
+ * the current six second slot, and a blink happens once per three second slot with a random offset;
+ * both are pure functions of elapsed time, so a dropped frame never shifts the rhythm and no state
+ * (and no timer beyond the frame callback) is needed.
  */
 final class DaozaiView extends View {
 
     private static final long FRAME_MS = 40L;
-    private static final float SWAY_DEG = 8f;
-    private static final float SWAY_S = 3.2f;
-    private static final float BLINK_S = 4.3f;
-    private static final float BREATH_S = 2.6f;
+    /** Seconds per mood slot; the hash decides which mood, so it sometimes holds for two slots. */
+    private static final float MOOD_S = 6f;
+    /** Seconds per blink slot; roughly one blink per slot, some slots are skipped. */
+    private static final float BLINK_S = 3.4f;
+    private static final float BLINK_LEN = 0.20f;
+    private static final int EYE_COLOR = 0xFFE9E9F0;
 
     private final float density;
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -46,7 +50,7 @@ final class DaozaiView extends View {
     DaozaiView(Context context) {
         super(context);
         density = getResources().getDisplayMetrics().density;
-        paint.setStrokeJoin(Paint.Join.ROUND);
+        paint.setStyle(Paint.Style.FILL);
         paint.setStrokeCap(Paint.Cap.ROUND);
     }
 
@@ -93,56 +97,72 @@ final class DaozaiView extends View {
         float t = (android.os.SystemClock.elapsedRealtime() - started) / 1000f;
         float cx = getWidth() / 2f;
         float cy = getHeight() / 2f;
-        float radius = Math.min(getWidth(), getHeight()) / 2f - dp(0.5f);
+        float size = Math.min(getWidth(), getHeight());
 
-        // Sway and breathe around the centre so the face stays inside the 24 dp square.
-        float sway = (float) Math.sin(t * 2 * Math.PI / SWAY_S) * SWAY_DEG;
-        float breath = 1f + 0.02f * (float) Math.sin(t * 2 * Math.PI / BREATH_S);
-        canvas.save();
-        canvas.rotate(sway, cx, cy);
-        canvas.scale(breath, breath, cx, cy);
+        int slot = (int) Math.floor(t / MOOD_S);
+        boolean smile = (hash(slot * 2654435761L) & 1) == 1;
+        float open = openAt(t);
 
-        // Head.
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0xFFF7C58C);
-        canvas.drawCircle(cx, cy, radius * 0.94f, paint);
-        paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(dp(0.8f));
-        paint.setColor(0xFF4A3623);
-        canvas.drawCircle(cx, cy, radius * 0.94f, paint);
-
-        // Cheeks, drawn under the eyes so the face reads as warm rather than flat.
-        paint.setStyle(Paint.Style.FILL);
-        paint.setColor(0x33E8623C);
-        canvas.drawCircle(cx - radius * 0.52f, cy + radius * 0.16f, radius * 0.17f, paint);
-        canvas.drawCircle(cx + radius * 0.52f, cy + radius * 0.16f, radius * 0.17f, paint);
-
-        // Eyes: a slow blink every few seconds, closed for roughly 90 ms.
-        float phase = t % BLINK_S;
-        float open = 1f;
-        if (phase > BLINK_S - 0.14f) {
-            float edge = Math.min(phase - (BLINK_S - 0.14f), BLINK_S - phase);
-            open = Math.max(0.06f, Math.min(1f, edge / 0.045f));
+        float gap = size * 0.185f;
+        paint.setColor(EYE_COLOR);
+        if (smile) {
+            drawSmileEye(canvas, cx - gap, cy, size, open);
+            drawSmileEye(canvas, cx + gap, cy, size, open);
+        } else {
+            drawRoundEye(canvas, cx - gap, cy, size, open);
+            drawRoundEye(canvas, cx + gap, cy, size, open);
         }
-        paint.setColor(0xFF2C2118);
-        float eyeW = radius * 0.15f;
-        float eyeH = radius * 0.19f * open;
-        oval.set(cx - radius * 0.36f - eyeW, cy - radius * 0.18f - eyeH,
-                cx - radius * 0.36f + eyeW, cy - radius * 0.18f + eyeH);
-        canvas.drawOval(oval, paint);
-        oval.set(cx + radius * 0.36f - eyeW, cy - radius * 0.18f - eyeH,
-                cx + radius * 0.36f + eyeW, cy - radius * 0.18f + eyeH);
-        canvas.drawOval(oval, paint);
+    }
 
-        // Smile.
+    /** Wide eye: a rounded pillar that squashes almost flat while blinking. */
+    private void drawRoundEye(Canvas canvas, float x, float y, float size, float open) {
+        float halfW = size * 0.070f;
+        float halfH = size * 0.125f * open + halfW * (1f - open);
+        oval.set(x - halfW, y - halfH, x + halfW, y + halfH);
+        canvas.drawRoundRect(oval, halfW, halfW, paint);
+    }
+
+    /** Smiling eye: the top of a circle, flattened into a line while blinking. */
+    private void drawSmileEye(Canvas canvas, float x, float y, float size, float open) {
+        float stroke = size * 0.085f;
         paint.setStyle(Paint.Style.STROKE);
-        paint.setStrokeWidth(dp(1.1f));
-        paint.setColor(0xFF2C2118);
-        oval.set(cx - radius * 0.42f, cy + radius * 0.02f,
-                cx + radius * 0.42f, cy + radius * 0.62f);
+        paint.setStrokeWidth(stroke);
+        float halfW = size * 0.135f;
+        float halfH = size * 0.105f * Math.max(0.08f, open);
+        oval.set(x - halfW, y - halfH, x + halfW, y + halfH);
         canvas.drawArc(oval, 20f, 140f, false, paint);
+        paint.setStyle(Paint.Style.FILL);
+    }
 
-        canvas.restore();
+    /**
+     * 1 while the eyes are open, tapering to near 0 for one blink.
+     *
+     * <p>Each slot gets a hashed offset and a cheap gate, so blinks do not land on a metronome.
+     */
+    private float openAt(float t) {
+        int slot = (int) Math.floor(t / BLINK_S);
+        long h = hash(slot * 2654435761L + 991L);
+        if ((h & 3L) == 0L) {
+            return 1f;
+        }
+        float offset = ((h >>> 8) & 1023L) / 1023f * (BLINK_S - BLINK_LEN - 0.2f);
+        float local = t - slot * BLINK_S - offset;
+        if (local <= 0f || local >= BLINK_LEN) {
+            return 1f;
+        }
+        float p = local / BLINK_LEN;
+        float close = 1f - Math.abs(p * 2f - 1f);
+        return Math.max(0.06f, 1f - 0.94f * close);
+    }
+
+    /** Cheap integer mix; enough randomness for two moods and a blink. */
+    private static long hash(long value) {
+        long x = value ^ (value >>> 33);
+        x *= 0xff51afd7ed558ccdL;
+        x ^= x >>> 33;
+        x *= 0xc4ceb9fe1a85ec53L;
+        x ^= x >>> 33;
+        return x;
     }
 
     private float dp(float value) {

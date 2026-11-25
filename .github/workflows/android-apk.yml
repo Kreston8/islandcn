@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.8.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.9.<run number>)"
         required: false
         default: ""
   push:
@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-             -PversionName="2.8.${{ github.run_number }}"
+            -PversionName="2.9.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-              "dist/islandcn-island-2.8.${{ github.run_number }}.apk"
+              "dist/islandcn-island-2.9.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,31 +97,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.8.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.9.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
           ## English
 
           **What is new in this build**
-          - **The island sits higher.** Its top edge now lines up with the status bar instead of a few dp below it, so it stops covering the first row of whatever is underneath.
-          - **The standby pill stays on the desktop.** The five-second disappearance is fixed: an empty home-screen check was being read as "not the launcher" and hid the pill; it now keeps the previous answer.
-          - **Cards take turns.** While a notification card and the standby pill both exist they swap every 3 seconds; close the notification by hand and only the standby pill is left. A lyric line wins outright: it stays on screen and gives a fresh notification exactly 3 seconds before coming back where the line should be by now.
-          - **Headset battery on the lyric strip, always.** With music playing the Bluetooth chips are drawn at the far right whether or not 蓝牙设备电量 is on.
-          - **岛仔 replaces the puppy**, and **AQI** joins the standby items: a hand-drawn face that blinks, breathes and sways all the time, plus a US AQI reading with the same four-colour grading, on its own switch and reorderable.
-          - **Icons and text.** A card now shows the notifying app's own icon — WeChat and QQ put the contact's avatar in the large icon, so that is what you see, with the app icon as the fallback. Fonts went up a step, the pill widens to fit the sentence up to the screen edge before it starts scrolling, and lyric lines stay put because the per-character highlight owns them.
+          - **The mascot is two eyes and nothing else.** No face, no blush, no colour: two pale eyes on the dark pill, switching at random between round eyes and a smiling crescent, blinking every few seconds. It is one `invalidate()` per frame and no bitmap.
+          - **Line of the day is bigger** (15sp instead of 12.5sp) and may run wider before it is cut off.
+          - **SMS now shows only what matters.** Only pickup codes get a card, and it reads the way the message does — `菜鸟驿站：1-2-3456`, the place first, then the code. It joins the 3-second rotation with everything else, and **a tap goes straight to that SMS conversation**; Android has no public way to open one single message, so the conversation opens on its newest message.
+          - **Long-press the island to copy all of it.** Heading, body and code in one string: `菜鸟驿站：1-2-3456`.
+          - **Bluetooth battery, read the way Settings reads it.** The hidden `BluetoothDevice.getBatteryLevel()` is asked first, then the system's battery broadcast, then a GATT read of the standard battery service (`0x180F`/`0x2A19`) at most once every ten minutes per device, closing the connection the moment the value arrives. A mouse icon joined the headset and watch ones.
+          - **One bar instead of two for the standby pill.** The master switch and every item — weather, AQI, mascot, quote — now share one row: switch, name, up, down. Each item has its own switch, so one can be hidden without reordering anything.
+          - **Notifications, narrowed.** Three switches: *only WeChat plus SMS pickup codes*, then one each for **WeChat** and **SMS pickup codes**, and those two bite at any time whether the master is on or off. Calls, alarms, navigation and music keep their own switches and are never touched by the master.
+          - **Weather finally says what went wrong.** An empty city now states "no city yet" instead of silently drawing nothing; a failure backs off for 90 seconds instead of retrying every four; a non-2xx answer throws with its status code instead of handing an empty body to the parser; and 立即测试天气 runs one request on the spot and prints the raw result in the app.
 
-          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`, so there is nothing to choose between. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Signing is unchanged, so this installs straight over 2.7.15. The temperature and AQI items only run when you type a city and reach api.open-meteo.com and air-quality-api.open-meteo.com; lyrics reach music.163.com. Permissions, limits and the switches table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
+          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`, so there is nothing to choose between. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Signing is unchanged, so this installs straight over 2.8.18. Two limits worth knowing: the accessory battery path starts with a hidden platform method that some ROMs block (the GATT read is the fallback, and a classic-only headset has no GATT server to read), and an SMS card opens the conversation, not one specific message. Three hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
 
           ## 中文
 
           **本次更新**
-          - **灵动岛往上挪了。** 顶部和状态栏对齐，不再压住下面内容的第一行。
-          - **桌面常驻不再五秒消失。** 原因是「桌面检测」拿到空结果时被当成「不在桌面」而收起胶囊，现在空结果保留上一次的结论。
-          - **卡片轮流显示。** 通知卡片和常驻胶囊同时存在时每 3 秒切换；手动关掉通知就只剩常驻。歌词优先级最高：一直显示，来通知只让位 3 秒，然后按已经过去的时间回到该唱的那一句。
-          - **歌词条固定显示耳机电量。** 播放音乐时不管「蓝牙设备电量」开关是否打开，最右端都会画上电量方块。
-          - **小狗换成岛仔**，常驻新增 **空气质量 AQI**：一个会眨眼、呼吸、左右轻晃的手绘脸，加上按四级配色显示的 US AQI，各有独立开关，可调整顺序。
-          - **图标与文字。** 卡片显示发通知那个应用自己的图标——微信、QQ 会把联系人头像放进大图标，所以看到的就是头像，取不到时退回应用图标。字号整体加大一档，句子长时胶囊先加宽到屏幕边缘，仍放不下才左右滚动；歌词行不滚动，因为逐字高亮要独占它。
+          - **岛仔只剩两只眼睛。** 没有脸、没有腮红、没有颜色：深色胶囊上两只浅色眼睛，圆眼和弯眼微笑随机切换，隔几秒眨一下。每帧一次重绘，不占位图。
+          - **每日一句字号再加大**（12.5sp → 15sp），放不下时先允许更宽再截断。
+          - **短信只关注取件码。** 现在只有取件码才上岛，而且按短信原文的样子读出来——`菜鸟驿站：1-2-3456`，先是快递点，再是取件码。它和其他内容一起参与 3 秒轮换，**点一下岛直接跳到那条短信的会话**（原来要点两下，现在卡片本身就是链接）；Android 没有公开接口能定位到「某一条」短信，所以打开的是会话里最新的那条。
+          - **长按岛复制。** 标题、正文和取件码拼成一条：`菜鸟驿站：1-2-3456`。
+          - **蓝牙电量改成系统设置那样的读法。** 先问隐藏的 `BluetoothDevice.getBatteryLevel()`，再读系统的电量广播，最后才用 GATT 读标准电量服务（`0x180F`/`0x2A19`），每个设备 10 分钟内最多读一次，读到立刻断开。图标多了鼠标。
+          - **常驻只剩一条 bar。** 总开关和每一项（天气、AQI、岛仔、每日一句）都在同一行里：开关、名字、↑、↓。每项有独立开关，不想看哪一项直接关掉，不用调顺序。
+          - **通知细分。** 三个开关：*只显示微信 + 短信取件码*，再加 **微信** 和 **短信取件码** 各一个；这两个单独开关随时生效，总开关开不开都算。来电、闹钟、导航、音乐有自己的开关，不受总开关影响。
+          - **天气出问题会说话了。** 没填城市会直接写明「没填城市」，不再默默什么都不画；失败后 90 秒内不再重试，不再每 4 秒打一次；接口返回非 2xx 时带着状态码报错，不再把空字符串丢给解析器；新增「立即测试天气」，当场发一次请求并在界面上打印原始结果。
 
-          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`，不存在选哪个的问题。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。签名未变，可直接覆盖 2.7.15 安装。温度与 AQI 只有手填城市后才会联网，访问 api.open-meteo.com 与 air-quality-api.open-meteo.com；歌词访问 music.163.com。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
+          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`，不存在选哪个的问题。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。签名未变，可直接覆盖 2.8.18 安装。两个要提前知道的限制：蓝牙电量第一路走的是隐藏接口，部分 ROM 会拦（GATT 是兜底，而纯经典蓝牙耳机没有 GATT 服务可读）；短信卡片打开的是会话，不是某一条。只访问三个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

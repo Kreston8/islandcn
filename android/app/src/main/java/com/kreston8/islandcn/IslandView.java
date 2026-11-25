@@ -95,6 +95,10 @@ public final class IslandView extends FrameLayout {
     private float touchDownY;
     private boolean swipedAway;
     private String copyValue;
+    /** Everything the card shows, copied on a long press; empty until the first bind. */
+    private String copyAll = "";
+    /** True when the whole card is a link (an SMS), so the first tap opens it instead of folding. */
+    private boolean tapOpens;
     private long etaMillis;
     private int kind = IslandEvent.KIND_GENERIC;
     private int expandedHeightDp = H_EXPANDED_DP;
@@ -261,6 +265,14 @@ public final class IslandView extends FrameLayout {
                 swipedAway = false;
                 return;
             }
+            if (!expanded && tapOpens) {
+                // A pickup code is worth more than a bigger card: the tap goes straight to the
+                // message it came from, and a long press still copies it.
+                if (actions != null) {
+                    actions.onOpen();
+                }
+                return;
+            }
             if (expanded) {
                 if (actions != null) {
                     actions.onOpen();
@@ -268,6 +280,15 @@ public final class IslandView extends FrameLayout {
             } else {
                 setExpanded(true, true);
             }
+        });
+        // Long press copies the whole card. The framework swallows the tap that follows, so a
+        // long press never also expands the island.
+        card.setOnLongClickListener(v -> {
+            if (actions == null || copyAll == null || copyAll.isEmpty()) {
+                return false;
+            }
+            actions.onCopy(copyAll);
+            return true;
         });
         card.setOnTouchListener((v, event) -> {
             if (event.getAction() == MotionEvent.ACTION_DOWN) {
@@ -352,6 +373,8 @@ public final class IslandView extends FrameLayout {
         }
 
         // Grow to fit the line first; only a line that still does not fit scrolls.
+        tapOpens = event.smsAddress != null;
+        copyAll = joinAll(heading);
         fitWidth();
         renderBt(event.bt);
         applyFraction(fraction);
@@ -359,6 +382,45 @@ public final class IslandView extends FrameLayout {
         setContentDescription(event.appLabel);
     }
 
+    /**
+     * Everything the card currently shows, for the long-press copy.
+     *
+     * <p>Heading, the visible body line and the code, each added once; a pickup card reads
+     * "菜鸟驿站：1-2-3456" because the place leads and the code follows.
+     */
+    private String joinAll(CharSequence heading) {
+        StringBuilder out = new StringBuilder();
+        appendPart(out, heading == null ? null : heading.toString(), false);
+        String body = null;
+        if (countdownView.getVisibility() == View.VISIBLE) {
+            body = countdownView.getText().toString();
+        } else if (textView.getVisibility() == View.VISIBLE) {
+            body = textView.getText().toString();
+        }
+        appendPart(out, body, kind == IslandEvent.KIND_PICKUP);
+        appendPart(out, copyValue, kind == IslandEvent.KIND_PICKUP);
+        return out.toString();
+    }
+
+    private static void appendPart(StringBuilder out, String part, boolean colon) {
+        if (part == null) {
+            return;
+        }
+        String value = part.trim();
+        if (value.isEmpty() || out.indexOf(value) >= 0) {
+            return;
+        }
+        if (out.length() > 0) {
+            out.append(colon ? "：" : " · ");
+        }
+        out.append(value);
+    }
+
+    /** Fresh Bluetooth levels for the chips already on screen, without changing the expansion. */
+    void setChips(java.util.List<IslandEvent.Bt> devices) {
+        renderBt(devices);
+        applyFraction(fraction);
+    }
     boolean isExpanded() {
         return expanded;
     }

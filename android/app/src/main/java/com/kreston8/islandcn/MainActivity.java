@@ -39,7 +39,9 @@ public final class MainActivity extends Activity {
     private Button startStop;
     private TextView btState;
     private Button cityButton;
-    private LinearLayout orderBox;
+    private LinearLayout standbyRows;
+    private TextView weatherState;
+    private TextView cityHint;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -125,6 +127,14 @@ public final class MainActivity extends Activity {
         addFill(featuresCard, text(R.string.music_hint, 12f, 0xFF8A8A94, false), 12);
         addFill(featuresCard, text(R.string.lyrics_hint, 12f, 0xFF8A8A94, false), 6);
         addFill(root, featuresCard, 14);
+        LinearLayout notifyCard = card();
+        addFill(notifyCard, text(R.string.notify_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(notifyCard, text(R.string.notify_desc, 13f, COLOR_SECONDARY, false), 6);
+        switchRow(notifyCard, R.string.label_notify_only, Prefs.KEY_NOTIFY_ONLY, false);
+        switchRow(notifyCard, R.string.label_notify_wechat, Prefs.KEY_NOTIFY_WECHAT, true);
+        switchRow(notifyCard, R.string.label_notify_pickup, Prefs.KEY_NOTIFY_PICKUP, true);
+        addFill(notifyCard, text(R.string.notify_hint, 12f, 0xFF8A8A94, false), 8);
+        addFill(root, notifyCard, 14);
 
         LinearLayout btCard = card();
         addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
@@ -140,19 +150,22 @@ public final class MainActivity extends Activity {
         addFill(standbyCard, text(R.string.label_standby, 16f, COLOR_PRIMARY, true), 0);
         addFill(standbyCard, text(R.string.standby_hint, 13f, COLOR_SECONDARY, false), 6);
         switchRow(standbyCard, R.string.label_standby_enable, Prefs.KEY_STANDBY, false);
-        switchRow(standbyCard, R.string.label_standby_weather, Prefs.KEY_STANDBY_WEATHER);
-        switchRow(standbyCard, R.string.label_standby_aqi, Prefs.KEY_STANDBY_AQI);
-        switchRow(standbyCard, R.string.label_standby_puppy, Prefs.KEY_STANDBY_PUPPY);
-        switchRow(standbyCard, R.string.label_standby_quote, Prefs.KEY_STANDBY_QUOTE);
         addFill(standbyCard, text(R.string.standby_order_title, 13f, COLOR_PRIMARY, true), 14);
-        orderBox = new LinearLayout(this);
-        orderBox.setOrientation(LinearLayout.VERTICAL);
-        addFill(standbyCard, orderBox, 0);
-        renderOrder();
+        standbyRows = new LinearLayout(this);
+        standbyRows.setOrientation(LinearLayout.VERTICAL);
+        addFill(standbyCard, standbyRows, 0);
+        renderStandbyRows();
         cityButton = button(R.string.weather_city_set, v -> askCity());
         addTop(standbyCard, cityButton, 12);
+        cityHint = text(R.string.weather_city_hint, 12f, 0xFF8A8A94, false);
+        cityHint.setLineSpacing(dp(3), 1f);
+        addFill(standbyCard, cityHint, 6);
+        weatherState = text(R.string.weather_state_wait, 12f, 0xFF8A8A94, false);
+        weatherState.setLineSpacing(dp(3), 1f);
+        addFill(standbyCard, weatherState, 8);
+        addTop(standbyCard, button(R.string.weather_test, v -> testWeather()), 10);
         updateCity();
-        addFill(standbyCard, text(R.string.weather_city_desc, 12f, 0xFF8A8A94, false), 8);
+        addFill(standbyCard, text(R.string.weather_city_desc, 12f, 0xFF8A8A94, false), 10);
         addFill(standbyCard, text(R.string.standby_need_usage, 12f, 0xFF8A8A94, false), 6);
         addFill(root, standbyCard, 14);
 
@@ -204,6 +217,7 @@ public final class MainActivity extends Activity {
         serviceState.setText(running ? R.string.service_on : R.string.service_off);
         serviceState.setTextColor(running ? COLOR_OK : COLOR_IDLE);
         startStop.setText(running ? R.string.stop_island : R.string.start);
+        refreshWeatherState();
     }
 
     private void toggleService() {
@@ -305,7 +319,7 @@ public final class MainActivity extends Activity {
         toggle.setChecked(defaultOn ? Prefs.get(this, key) : Prefs.opt(this, key));
         toggle.setOnCheckedChangeListener((button, checked) -> {
             Prefs.set(this, key, checked);
-            if (IslandService.isRunning() && !isStandbyKey(key)) {
+            if (IslandService.isRunning() && !isLiveKey(key)) {
                 // These watchers only register at start-up, so they need to be re-read.
                 restartService();
             }
@@ -324,22 +338,58 @@ public final class MainActivity extends Activity {
                 || Prefs.KEY_STANDBY_QUOTE.equals(key);
     }
 
-    /** Rebuilds the order list: one row per item with 上移 / 下移, in the stored order. */
-    private void renderOrder() {
-        orderBox.removeAllViews();
+    /**
+     * Switches that are read while the service runs (every tick, or on every card), so flipping one
+     * needs no restart: the notification filter and the standby rows both take effect immediately.
+     */
+    private boolean isLiveKey(String key) {
+        return isStandbyKey(key)
+                || Prefs.KEY_NOTIFY_ONLY.equals(key)
+                || Prefs.KEY_NOTIFY_WECHAT.equals(key)
+                || Prefs.KEY_NOTIFY_PICKUP.equals(key);
+    }
+
+    /** One row per standby item: its own switch, then the two arrows, in the stored order. */
+    private void renderStandbyRows() {
+        if (standbyRows == null) {
+            return;
+        }
+        standbyRows.removeAllViews();
         String[] order = Prefs.order(this);
         for (int i = 0; i < order.length; i++) {
             final int index = i;
+            String item = order[i];
+            String key = itemKey(item);
             LinearLayout row = new LinearLayout(this);
             row.setOrientation(LinearLayout.HORIZONTAL);
             row.setGravity(Gravity.CENTER_VERTICAL);
-            row.addView(text(labelOf(order[i]), 13f, COLOR_PRIMARY, false),
-                    new LinearLayout.LayoutParams(
-                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            Switch toggle = new Switch(this);
+            toggle.setChecked(Prefs.get(this, key));
+            toggle.setOnCheckedChangeListener((button, checked) -> Prefs.set(this, key, checked));
+            row.addView(toggle, new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+            TextView label = text(labelOf(item), 13f, COLOR_PRIMARY, false);
+            label.setPadding(dp(8), 0, 0, 0);
+            row.addView(label, new LinearLayout.LayoutParams(
+                    0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
             row.addView(smallButton(R.string.standby_move_up, v -> move(index, -1)));
             row.addView(smallButton(R.string.standby_move_down, v -> move(index, 1)));
-            addFill(orderBox, row, 8);
+            addFill(standbyRows, row, 8);
         }
+    }
+
+    /** The preference behind one standby item, so its switch and the pill always agree. */
+    private String itemKey(String item) {
+        if ("weather".equals(item)) {
+            return Prefs.KEY_STANDBY_WEATHER;
+        }
+        if ("puppy".equals(item)) {
+            return Prefs.KEY_STANDBY_PUPPY;
+        }
+        if ("aqi".equals(item)) {
+            return Prefs.KEY_STANDBY_AQI;
+        }
+        return Prefs.KEY_STANDBY_QUOTE;
     }
 
     /** Swaps one item with its neighbour and stores the result as a comma list. */
@@ -353,7 +403,7 @@ public final class MainActivity extends Activity {
         order[index] = order[target];
         order[target] = swap;
         Prefs.setText(this, Prefs.KEY_STANDBY_ORDER, String.join(",", order));
-        renderOrder();
+        renderStandbyRows();
     }
 
     private int labelOf(String item) {
@@ -389,6 +439,33 @@ public final class MainActivity extends Activity {
     private void updateCity() {
         String city = Prefs.text(this, Prefs.KEY_CITY).trim();
         cityButton.setText(city.isEmpty() ? getString(R.string.weather_city_set) : city);
+        refreshWeatherState();
+    }
+
+    /**
+     * What the standby pill's last weather request did, taken straight from the view that made it.
+     *
+     * <p>Before this the only sign of a failure was a row that never appeared, which is exactly the
+     * "weather does nothing" report this state is here to answer.
+     */
+    private void refreshWeatherState() {
+        if (weatherState == null) {
+            return;
+        }
+        weatherState.setText(StandbyView.Weather.statusText(this));
+    }
+
+    /**
+     * Runs one weather request on the spot and shows the raw answer, so a misspelt city, a blocked
+     * network and an empty response can be told apart instead of guessed at.
+     */
+    private void testWeather() {
+        String city = Prefs.text(this, Prefs.KEY_CITY).trim();
+        weatherState.setText(R.string.weather_testing);
+        new Thread(() -> {
+            String result = StandbyView.Weather.probe(this, city);
+            runOnUiThread(() -> weatherState.setText(result));
+        }, "weather-probe").start();
     }
 
     private boolean canReadBluetooth() {

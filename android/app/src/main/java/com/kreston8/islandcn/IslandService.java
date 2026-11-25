@@ -12,6 +12,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.net.Uri;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.Icon;
 import android.os.Build;
@@ -120,6 +121,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
 
     /** Every music card key starts with this, which is how a stopped track is recognised. */
     private static final String MUSIC_KEY = "music:";
+    /** WeChat's package name, the one source the notification filter can name. */
+    private static final String WECHAT = "com.tencent.mm";
 
     static boolean isRunning() {
         return running;
@@ -161,6 +164,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
 
     public void onIslandEvent(IslandEvent event) {
         if (event == null) {
+            return;
+        }
+        if (!allow(event)) {
             return;
         }
         if (!Prefs.enabled(this, event.kind)) {
@@ -474,6 +480,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
         if (btWatcher == null) {
             btWatcher = new BtWatcher();
+            // A level read over GATT arrives later, possibly on another thread; redraw there.
+            btWatcher.levelListener(this::onBtLevels);
         }
         try {
             btWatcher.start(this);
@@ -482,8 +490,65 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             // Without BLUETOOTH_CONNECT there is nothing to read, so no chips ever appear.
         }
     }
+    /**
+     * The notification filter: one master switch that keeps only WeChat and SMS pickup codes, plus
+     * one switch per source.
+     *
+     * <p>Call, alarm, navigation and music are features of their own with their own switches, so the
+     * master never touches them. The two per-source switches bite at any time: turning WeChat off
+     * hides it even with the master off.
+     */
+    private boolean allow(IslandEvent event) {
+        if (event.kind == IslandEvent.KIND_CALL || event.kind == IslandEvent.KIND_ALARM
+                || event.kind == IslandEvent.KIND_NAV || event.kind == IslandEvent.KIND_MUSIC) {
+            return true;
+        }
+        boolean wechat = WECHAT.equals(event.pkg);
+        boolean pickup = event.kind == IslandEvent.KIND_PICKUP;
+        if (wechat && !Prefs.get(this, Prefs.KEY_NOTIFY_WECHAT)) {
+            return false;
+        }
+        if (pickup && !Prefs.get(this, Prefs.KEY_NOTIFY_PICKUP)) {
+            return false;
+        }
+        if (!Prefs.opt(this, Prefs.KEY_NOTIFY_ONLY)) {
+            return true;
+        }
+        return wechat || pickup;
+    }
+
+    /**
+     * A level the Bluetooth watcher just read, possibly from its own thread; the chips on the card
+     * are redrawn in place instead of waiting for the next notification.
+     */
+    private void onBtLevels() {
+        handler.post(() -> {
+            IslandEvent event = current;
+            if (event == null) {
+                return;
+            }
+            event.bt(chipsFor(event.kind));
+            if (island != null) {
+                island.setChips(event.bt);
+            }
+        });
+    }
 
     private void openCurrent() {
+        IslandEvent smsTarget = current;
+        if (smsTarget != null && smsTarget.smsAddress != null) {
+            // Android has no public way to open one message; the conversation that holds it is the
+            // closest thing, and the code is the newest message in it.
+            try {
+                Intent sms = new Intent(Intent.ACTION_VIEW,
+                        Uri.parse("sms:" + Uri.encode(smsTarget.smsAddress)));
+                sms.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(sms);
+                return;
+            } catch (Throwable ignored) {
+                // No messaging app claimed the address; fall through to the app itself.
+            }
+        }
         handler.removeCallbacks(collapseTask);
         if (island != null) {
             island.setExpanded(false, true);

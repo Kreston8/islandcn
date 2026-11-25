@@ -18,11 +18,18 @@ final class ContentParser {
         final int kind;
         final String code;
         final long etaMillis;
+        /** Where the parcel waits ("菜鸟驿站", "丰巢"), when the message named a place. */
+        final String station;
 
         Result(int kind, String code, long etaMillis) {
+            this(kind, code, etaMillis, null);
+        }
+
+        Result(int kind, String code, long etaMillis, String station) {
             this.kind = kind;
             this.code = code;
             this.etaMillis = etaMillis;
+            this.station = station;
         }
     }
 
@@ -41,6 +48,11 @@ final class ContentParser {
 
     private static final Pattern PICKUP_CODE = Pattern.compile(
             "(\\d{1,3}-\\d{1,3}-\\d{3,5})|([A-Za-z]?\\d{4,8})");
+    /** Longest names first, so "菜鸟驿站" wins over "菜鸟" and "快递柜" over "快递". */
+    private static final Pattern PICKUP_STATION = Pattern.compile(
+            "(菜鸟驿站|菜鸟|丰巢|蜂巢|速递易|快递柜|智能柜|驿站|快递超市|快递点|代收点|自提柜"
+                    + "|京东|顺丰|中通|圆通|申通|韵达|极兔|邮政|百世|德邦|天猫|苏宁|菜篮子"
+                    + "|便利店|超市|门卫|物业|前台|收发室)");
 
     private static final Pattern DELIVERY_KEYWORD = Pattern.compile(
             "(外卖|骑手|配送|送达|送到|准时达|便当|餐品)");
@@ -71,7 +83,7 @@ final class ContentParser {
         }
         String pickup = pickupCode(sample);
         if (pickup != null) {
-            return new Result(IslandEvent.KIND_PICKUP, pickup, 0L);
+            return new Result(IslandEvent.KIND_PICKUP, pickup, 0L, pickupStation(sample));
         }
         long eta = deliveryEta(sample);
         if (eta > 0L) {
@@ -126,12 +138,26 @@ final class ContentParser {
         if (!keyword.find()) {
             return null;
         }
-        String after = sample.substring(keyword.end(), Math.min(sample.length(), keyword.end() + 24));
+        String after = sample.substring(keyword.end(), Math.min(sample.length(), keyword.end() + 32));
         Matcher code = PICKUP_CODE.matcher(after);
         if (code.find()) {
             return code.group(1) != null ? code.group(1) : code.group(2);
         }
         return null;
+    }
+
+    /**
+     * The place named in the message, so the island can read "菜鸟驿站：1-2-3456" instead of a
+     * bare code. Couriers almost always print the shop or cabinet next to the code; when none of
+     * the known names appear the caller falls back to the sender.
+     */
+    private static String pickupStation(String sample) {
+        Matcher station = PICKUP_STATION.matcher(sample);
+        if (!station.find()) {
+            return null;
+        }
+        String name = station.group(1);
+        return name == null || name.length() == 0 ? null : name;
     }
 
     private static long deliveryEta(String sample) {

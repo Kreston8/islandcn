@@ -17,7 +17,7 @@ the title, body and application, four by their own sources:
 | Kind | Trigger | Card |
 |---|---|---|
 | 验证码 | SMS with a code keyword, or a notification containing one | big code + 点击复制 |
-| 取件码 | "取件码/取货码/提货码" plus a code nearby | big code + 点击复制 |
+| 取件码 | SMS with 取件码/取货码/提货码 plus a code nearby | 快递点：取件码 (`菜鸟驿站：1-2-3456`), a tap opens that SMS conversation |
 | 外卖 | "预计 12:35 送达", "还有 18 分钟" | countdown that refreshes every 15 s |
 | 待办 | notification from 小米笔记 / a notes app | tag + the todo text |
 | 来电 | call state callback | tag + 号码 / 未知号码，tap 打开拨号盘 |
@@ -34,22 +34,30 @@ at 250 dp, widens until the sentence fits up to the screen edge, and only past t
 the lyric line is exempt because the per-character highlight owns it.
 
 The code rows copy to the clipboard and collapse the island; the notification itself is left in the
-shade so the copy is never destructive.
+shade so the copy is never destructive. A long press anywhere on the card copies everything it shows as
+one string — heading, body and code, `菜鸟驿站：1-2-3456` — which is also the quickest way to grab a
+code off the collapsed pill.
 
 ### Bluetooth battery chips
 
 When 蓝牙设备电量 is on, the right end of the pill shows one chip per connected accessory — watch,
-earbuds, anything else — as an icon with the percentage underneath, up to three devices. A lyric line
-always carries them, whatever the switch says, because that is the moment the level matters; the pill
-widens instead of squeezing the text.
+earbuds, mouse, anything else — as an icon with the percentage underneath, up to three devices. A lyric
+line always carries them, whatever the switch says, because that is the moment the level matters; the
+pill widens instead of squeezing the text.
 
-Android has no public battery API for accessories. The percentage is whatever the device last pushed
-through the platform's own `BATTERY_LEVEL_CHANGED` broadcast, so:
+Android has no public battery API for accessories, so a level is hunted down in three steps, cheapest
+first:
 
-- a device that has never reported keeps its icon and shows `--`, because a wrong number on a watch is
-  worse than none;
-- after a fresh install the numbers only appear once a device reports again (typically at connect);
-- the app never opens a GATT connection to read a level — doing that to earbuds disturbs playback.
+1. the hidden `BluetoothDevice.getBatteryLevel()`, which is the number Settings shows — greylisted, so
+   some ROMs answer -1 or throw;
+2. the platform's own `BATTERY_LEVEL_CHANGED` broadcast, sent when a device pushes a level (typically
+   at connect), cached and persisted;
+3. a GATT read of the standard battery service (`0x180F`/`0x2A19`), LE and dual-mode devices only, at
+   most once every ten minutes per address, closing the connection as soon as the value arrives.
+
+Consequences worth knowing: a classic-only headset has no GATT server, so for those only the first two
+steps can answer; a device that never reports keeps its icon and shows `--`, because a wrong number on
+a watch is worse than none.
 
 ### Standby pill (桌面常驻)
 
@@ -60,15 +68,17 @@ the items you enabled:
   Needs a city name typed in the app; there is no location permission and no GPS.
 - **空气质量 AQI** — the US AQI for the same city, graded into four colours (<50 green, <100 yellow,
   <150 orange, above that red).
-- **岛仔表情** — a hand-drawn face that blinks, breathes and sways the whole time it is on screen. It
-  is an approximation of the 岛仔 mascot drawn in code, not the original artwork.
-- **每日一句** — one line of encouragement, chosen by day of year so it changes once a day.
+- **岛仔表情** — two eyes and nothing else: no face, no blush, no colour. Round eyes and a smiling
+  crescent take turns from a hash of the clock and blink every few seconds. Drawn in code as an
+  approximation of the mascot, not the original artwork.
+- **每日一句** — one line of encouragement at 15sp, chosen by day of year so it changes once a day.
 
-The four items can be reordered with 上移 / 下移. While a notification card exists as well the two swap
-every 3 seconds, and closing that notification by hand leaves the standby pill alone on screen. A lyric
-line outranks both: it keeps the pill, gives a fresh notification exactly 3 seconds, then comes back at
-the position the track has reached meanwhile. The pill still disappears the moment the launcher is no
-longer in front or the screen is locked.
+The four items sit one per row — switch, name, 上移, 下移 — under the master switch, so hiding an item
+never needs a reorder. While a notification card exists as well the two swap every 3 seconds, and
+closing that notification by hand leaves the standby pill alone on screen. A lyric line outranks both:
+it keeps the pill, gives a fresh notification exactly 3 seconds, then comes back at the position the
+track has reached meanwhile. The pill still disappears the moment the launcher is no longer in front
+or the screen is locked.
 
 ## How it works
 
@@ -98,17 +108,26 @@ longer in front or the screen is locked.
   content while the corner radius interpolates from a pill to a card. `OvershootInterpolator` gives
   the spring. Every card is the same 44 dp strip, which is why a copyable code sits in the title row
   and a countdown takes over the body line.
-- `BtWatcher` (`BtWatcher.java`) listens for the hidden `BATTERY_LEVEL_CHANGED` broadcast, keeps the
-  last known level per device address in `SharedPreferences`, and lists connected devices through
-  `BluetoothManager.getConnectedDevices` for the `GATT` and `HEADSET` profiles. Every call is guarded:
-  without `BLUETOOTH_CONNECT` it returns nothing instead of crashing the overlay.
+- `BtWatcher` (`BtWatcher.java`) is the battery reading, in three steps: the hidden
+  `BluetoothDevice.getBatteryLevel()` (the same number Settings prints), then the hidden
+  `BATTERY_LEVEL_CHANGED` broadcast, then a GATT read of the standard battery service
+  (`0x180F`/`0x2A19`) for LE and dual-mode devices. A read opens a connection to the accessory, so
+  each address is asked at most once every ten minutes and the link is closed the moment the value
+  arrives, or after nine seconds. The last known level per address lives in `SharedPreferences`, and a
+  fresh one is pushed to the card through a listener instead of waiting for the next notification.
+  Every platform call is guarded: without `BLUETOOTH_CONNECT` nothing is read rather than the overlay
+  crashing.
 - `StandbyView` (`StandbyView.java`) renders the standby pill and owns both lookups: geocoding
   (`geocoding-api.open-meteo.com`) turns the typed city into coordinates, then
   `api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code` returns the temperature and the
   WMO code that picks its icon, and `air-quality-api.open-meteo.com/v1/air-quality?current=us_aqi`
   adds the AQI. 6 s timeout, memory cache for 30 minutes, one request in flight, nothing requested
-  without a city. `DaozaiView` (`DaozaiView.java`) draws the face: every frame is a pure function of
-  the clock at 25 fps, so there are no bitmaps and nothing to load.
+  without a city. A non-2xx answer throws with its status code instead of being parsed as empty, the
+  latest outcome is kept as a line the app prints under the city field (立即测试天气 runs one request
+  on the spot), and a failure parks the network for 90 s rather than letting the 4 s tick hammer it.
+  `DaozaiView` (`DaozaiView.java`) draws the mascot: two eyes and nothing else. The mood comes from a
+  hash of the six-second clock slot — round eyes or a smiling crescent — and a second hash of a 3.4 s
+  slot decides the blinks, so a dropped frame costs nothing and there is no state to keep.
 - `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
   process.
 - `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
@@ -119,8 +138,9 @@ longer in front or the screen is locked.
   or a missing usage-access grant cancels it. One card per track.
 - `Prefs` (`Prefs.java`) is the switch store: one boolean per card kind, `on_lyrics` for the lyric
   lookup, `on_bt` for the battery chips, `on_standby` plus four item switches and an order string for
-  the standby pill. `IslandService.onIslandEvent` drops a card whose switch is off before the overlay
-  is touched at all.
+  the standby pill, and `on_only` / `on_wechat` / `on_pickup` for the notification filter.
+  `IslandService.onIslandEvent` runs that filter first, then drops a card whose switch is off, both
+  before the overlay is touched at all.
 - `Lyric` parses LRC (`[mm:ss.cc]` lines, credit lines filtered out) and answers "which line at this
   position" by binary search; `LyricSource` does the one HTTPS lookup per track with a 6 s timeout,
   a 512 KB cap and a 16 entry memory-only cache.
@@ -150,7 +170,10 @@ Every feature has its own switch in the app, 10 for the cards plus the additions
 | 联网歌词 | on | the one lyric lookup per track |
 | 蓝牙设备电量 | off | battery chips at the right end of the pill |
 | 桌面常驻 | off | the standby pill on the launcher |
-| 天气温度 / 空气质量 AQI / 岛仔表情 / 每日一句 | on | which items the standby pill contains |
+| 天气温度 / 空气质量 AQI / 岛仔表情 / 每日一句 | on | which items the standby pill contains; each has its own switch on one row |
+| 只显示微信 + 短信取件码 | off | drops every other app's notifications, verification codes included |
+| 微信通知 | on | WeChat cards, honoured whether the master above is on or off |
+| 短信取件码 | on | pickup-code cards, honoured whether the master is on or off |
 | 城市 | empty | no city means no weather request at all |
 
 ## Permissions the user has to grant

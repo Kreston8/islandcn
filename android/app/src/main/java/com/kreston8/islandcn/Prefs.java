@@ -39,6 +39,14 @@ final class Prefs {
     static final String KEY_STANDBY_ORDER = "sb_order";
     /** City name typed by the user; the only reason the weather request is ever made. */
     static final String KEY_CITY = "weather_city";
+    /**
+     * Notification detail switches: one master ("only WeChat plus SMS pickup codes") and one switch
+     * per source, so an OTP from a shopping app or a group-chat summary never reaches the island.
+     * The master is off by default ({@link #opt}); the two sources are on by default ({@link #get}).
+     */
+    static final String KEY_NOTIFY_ONLY = "on_only";
+    static final String KEY_NOTIFY_WECHAT = "on_wechat";
+    static final String KEY_NOTIFY_PICKUP = "on_pickup";
 
     /** The order a fresh install starts with, and the source of every known item. */
     private static final String[] ORDER_DEFAULT = {"weather", "aqi", "puppy", "quote"};

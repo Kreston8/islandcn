@@ -55,6 +55,8 @@ final class IslandEvent {
     Lyric lyric;
     /** Playback position, in ms, at the moment this event was built. */
     long position;
+    /** Sender address of an SMS card, so a tap can open that conversation; null for other cards. */
+    String smsAddress;
 
     IslandEvent lyric(Lyric value, long positionMs) {
         this.lyric = value;
@@ -297,13 +299,19 @@ final class IslandEvent {
         }
     }
 
-    /** An SMS the receiver classified as a code; returns null for ordinary messages. */
+    /**
+     * An SMS the receiver classified as a pickup code or a verification code; null for the rest.
+     *
+     * <p>A pickup message reads "菜鸟驿站：1-2-3456" on the island: the shop name is the heading and
+     * the code is the body. The sender address is kept on {@link #smsAddress} so that tapping the
+     * card opens that conversation instead of only dismissing the card.
+     */
     static IslandEvent sms(Context context, String sender, String body) {
         if (body == null || body.isEmpty()) {
             return null;
         }
         ContentParser.Result parsed = ContentParser.classify(null, null, sender, body);
-        if (parsed.kind == KIND_GENERIC) {
+        if (parsed.kind != KIND_PICKUP && parsed.kind != KIND_OTP) {
             return null;
         }
         String smsPackage = null;
@@ -323,18 +331,28 @@ final class IslandEvent {
         if (icon == null) {
             icon = toBitmap(context.getDrawable(R.drawable.ic_message), ICON_PX);
         }
-        return new IslandEvent(
+        String fallback = sender == null || sender.isEmpty() ? context.getString(R.string.sms_label) : sender;
+        String heading = fallback;
+        CharSequence text = body;
+        if (parsed.kind == KIND_PICKUP && parsed.code != null) {
+            // "菜鸟驿站：1-2-3456": the place leads, the code follows on the same line.
+            heading = parsed.station != null ? parsed.station : fallback;
+            text = parsed.code;
+        }
+        IslandEvent event = new IslandEvent(
                 "sms:" + System.currentTimeMillis(),
                 smsPackage,
-                sender == null || sender.isEmpty() ? context.getString(R.string.sms_label) : sender,
+                fallback,
                 icon,
-                sender == null || sender.isEmpty() ? context.getString(R.string.sms_label) : sender,
-                body,
+                heading,
+                text,
                 null,
                 System.currentTimeMillis(),
                 parsed.kind,
                 parsed.code,
                 parsed.etaMillis);
+        event.smsAddress = sender;
+        return event;
     }
 
     /** A fake event so the user can see the animation before a real notification arrives. */

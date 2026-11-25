@@ -78,11 +78,11 @@
 
     <string name="miui_hint">MIUI / HyperOS 提示：除上面几项权限，还需要在「应用管理 → islandcn 灵动岛 → 权限」里打开「后台弹出界面」，否则从后台弹不出胶囊。锁屏时系统会隐藏悬浮窗，这是系统限制。</string>
     <string name="label_bt">蓝牙设备电量</string>
-    <string name="bt_hint">配对的手表、耳机连上后显示在胶囊最右端：上面是设备图标，下面是它自己上报的电量。播放音乐时即使这个开关关着，电量也会出现在歌词条上。Android 没有公开的蓝牙电量接口，百分比来自系统把设备电量转发出来的那次广播，所以刚打开可能只看到图标，等设备下次上报（一般连上时就会报一次）才出现数字。最多同时显示 3 个设备。</string>
+    <string name="bt_hint">配对的手表、耳机、鼠标连上后显示在胶囊最右端：上面是设备图标（耳机／手表／鼠标），下面是百分比，和系统设置里那样。播放音乐时即使这个开关关着，电量也会出现在歌词条上。读取顺序：先问系统要设备缓存的电量，再读设备主动上报的那次广播，最后自己用蓝牙 GATT 读一遍电量服务（每台设备 10 分钟最多一次，读完立刻断开）。有些耳机不提供电量服务，这种只能看到图标。最多同时显示 3 个设备。</string>
     <string name="perm_bt_title">6. 附近设备（蓝牙）</string>
     <string name="perm_bt_desc">用来列出已连接的蓝牙设备和它们的名称。不授权也能用，只是拿不到设备名，图标会退回通用样式。</string>
     <string name="label_standby">桌面常驻</string>
-    <string name="standby_hint">打开后，只要停在桌面，胶囊就一直在：按下面设定的顺序显示天气（带天气图标）、空气质量 AQI、岛仔表情、每日一句。岛仔会一直眨眼、轻轻左右摇晃。如果同时有通知卡片，两者每 3 秒轮换显示；播放音乐时由歌词条占位，这时来通知会先显示 3 秒再回到歌词。进任何 App 就收起，回到桌面再出现。</string>
+    <string name="standby_hint">打开后，只要停在桌面，胶囊就一直在：按下面设定的顺序显示天气（带天气图标）、空气质量 AQI、岛仔表情、每日一句。岛仔只有两只眼睛——圆眼和弯眼微笑随机切换，偶尔眨一下。如果同时有通知卡片，两者每 3 秒轮换显示；播放音乐时由歌词条占位，这时来通知会先显示 3 秒再回到歌词。进任何 App 就收起，回到桌面再出现。</string>
     <string name="label_standby_weather">天气温度</string>
     <string name="label_standby_puppy">岛仔表情</string>
     <string name="label_standby_aqi">空气质量 AQI</string>
@@ -91,7 +91,7 @@
     <string name="standby_move_up">上移</string>
     <string name="standby_move_down">下移</string>
     <string name="weather_city_title">天气城市</string>
-    <string name="weather_city_hint">没设置城市时不显示温度</string>
+    <string name="weather_city_hint">没填城市时不显示温度和 AQI，填了才开始请求</string>
     <string name="weather_city_desc">填一个城市名（如 北京、杭州）换当前气温和空气质量。走 Open-Meteo 的三个公开接口：城市名换经纬度、取气温与天气代码、取 US AQI。HTTPS、6 秒超时、只放内存。这是「联网歌词」之外唯一会联网的地方，不用天气就一次都不请求；也不需要定位权限。</string>
     <string name="weather_city_set">设置城市</string>
     <string name="weather_failed">天气获取失败</string>
@@ -131,4 +131,21 @@
     </string-array>
     <string name="bt_unknown">蓝牙设备</string>
     <string name="label_standby_enable">开启桌面常驻</string>
+    <string name="copied_all">已复制岛上的文字</string>
+    <string name="notify_title">通知细分</string>
+    <string name="notify_desc">只留你要的那几条，其余 App 的通知一律不上岛。</string>
+    <string name="label_notify_only">只显示微信 + 短信取件码</string>
+    <string name="label_notify_wechat">微信通知</string>
+    <string name="label_notify_pickup">短信取件码</string>
+    <string name="notify_hint">三个开关可以一起用：总开关打开后，只有微信通知和短信取件码会显示，其他应用的通知（含验证码）直接丢弃；来电、闹钟、导航、音乐各有自己的开关，不受这里影响。下面两个单独开关随时生效，关掉就少一类，不看总开关。</string>
+    <string name="pickup_station_unknown">快递取件</string>
+    <string name="weather_state_nocity">没填城市：天气和 AQI 一定不会显示，点下面「设置城市」填一个</string>
+    <string name="weather_state_wait">还没有结果，保存后等几秒会自动重试</string>
+    <string name="weather_state_ago">%1$s · %2$d 秒前</string>
+    <string name="weather_ok_fmt">成功：%1$s，AQI %2$s</string>
+    <string name="weather_err_network">连不上 %1$s（%2$s）</string>
+    <string name="weather_err_place">地名接口找不到「%1$s」</string>
+    <string name="weather_err_empty">气温和 AQI 都没取到</string>
+    <string name="weather_test">立即测试天气</string>
+    <string name="weather_testing">正在请求天气，最多 18 秒…</string>
 </resources>
