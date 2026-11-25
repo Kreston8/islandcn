@@ -4,7 +4,7 @@ plugins {
 
 // CI passes -PversionCode / -PversionName so every release build is unique.
 val appVersionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
-val appVersionName = (project.findProperty("versionName") as String?) ?: "1.0.0"
+val appVersionName = (project.findProperty("versionName") as String?) ?: "2.0.0"
 
 android {
     namespace = "com.kreston8.islandcn"

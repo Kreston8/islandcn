@@ -1,6 +1,32 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">islandcn</string>
-    <string name="offline_message">islandcn.dev 打不开。检查网络后重试。</string>
-    <string name="retry">重试</string>
+    <string name="app_name">islandcn 灵动岛</string>
+
+    <string name="setup_title">islandcn 灵动岛</string>
+    <string name="setup_subtitle">原生悬浮窗实现：通知到达时在状态栏下方弹出胶囊，点击展开成卡片，上滑或点 × 关闭。不加载网页，不需要联网。</string>
+
+    <string name="perm_overlay_title">1. 悬浮窗权限</string>
+    <string name="perm_overlay_desc">用来把胶囊画在所有应用之上。</string>
+    <string name="perm_access_title">2. 通知使用权</string>
+    <string name="perm_access_desc">用来读取通知的标题、正文和应用图标。</string>
+    <string name="grant">去授权</string>
+    <string name="granted">已授权</string>
+    <string name="missing">未授权</string>
+
+    <string name="state_title">运行状态</string>
+    <string name="service_on">运行中</string>
+    <string name="service_off">未运行</string>
+    <string name="start">启动灵动岛</string>
+    <string name="stop_island">停止</string>
+    <string name="preview">预览效果</string>
+    <string name="preview_hint">先启动灵动岛，再预览</string>
+
+    <string name="channel_status">灵动岛运行状态</string>
+    <string name="running_hint">新通知会出现在屏幕顶部。</string>
+    <string name="need_overlay">缺少悬浮窗权限，无法显示灵动岛</string>
+
+    <string name="preview_title">预览通知</string>
+    <string name="preview_text">灵动岛正在工作。点击卡片打开应用，上滑关闭。</string>
+
+    <string name="miui_hint">MIUI / HyperOS 提示：除上面两项权限，还需要在「应用管理 → islandcn 灵动岛 → 权限」里打开「后台弹出界面」，否则从后台弹不出胶囊。锁屏时系统会隐藏悬浮窗，这是系统限制。</string>
 </resources>

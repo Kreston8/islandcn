@@ -1,232 +1,194 @@
 package com.kreston8.islandcn;
 
-import android.annotation.SuppressLint;
+import android.Manifest;
 import android.app.Activity;
-import android.content.ActivityNotFoundException;
 import android.content.Intent;
-import android.content.res.ColorStateList;
-import android.graphics.Color;
-import android.net.Uri;
+import android.content.pm.PackageManager;
+import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.Gravity;
 import android.view.View;
-import android.view.ViewGroup;
-import android.webkit.WebChromeClient;
-import android.webkit.WebResourceError;
-import android.webkit.WebResourceRequest;
-import android.webkit.WebSettings;
-import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.Button;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ProgressBar;
+import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
-/**
- * A thin shell around the islandcn site so the React island demos can run as an Android app.
- *
- * <p>islandcn is a Next.js site plus a shadcn registry, not a native app, so all the rendering
- * happens in the system WebView. This class only handles navigation: keeping the site's own pages
- * in the WebView, sending anything else to the browser, the back gesture, and an offline state.
- */
+/** Setup screen: the two permissions, the on/off switch, and a preview button. */
 public final class MainActivity extends Activity {
 
-    private static final String START_URL = "https://islandcn.dev/";
-    private static final String SITE_HOST = "islandcn.dev";
-    private static final int ACCENT = 0xFF34C759;
+    private static final int COLOR_BG = 0xFF0A0A0C;
+    private static final int COLOR_CARD = 0xFF15151A;
+    private static final int COLOR_PRIMARY = 0xFFFFFFFF;
+    private static final int COLOR_SECONDARY = 0xFF9A9AA4;
+    private static final int COLOR_OK = 0xFF34C759;
+    private static final int COLOR_MISSING = 0xFFFF9F0A;
+    private static final int COLOR_IDLE = 0xFF7C7C86;
 
-    private WebView web;
-    private ProgressBar progress;
-    private View errorPanel;
-    private TextView errorText;
+    private TextView overlayState;
+    private TextView accessState;
+    private TextView serviceState;
+    private Button startStop;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        FrameLayout root = new FrameLayout(this);
-        root.setBackgroundColor(Color.BLACK);
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(true);
+        scroll.setBackgroundColor(COLOR_BG);
+        LinearLayout root = new LinearLayout(this);
+        root.setOrientation(LinearLayout.VERTICAL);
+        root.setPadding(dp(20), dp(32), dp(20), dp(36));
+        scroll.addView(root);
+        setContentView(scroll);
 
-        web = new WebView(this);
-        web.setLayoutParams(
-                new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        web.setBackgroundColor(Color.BLACK);
-        configure(web.getSettings());
-        web.setWebViewClient(new SiteClient());
-        web.setWebChromeClient(new ProgressClient());
+        root.addView(text(R.string.setup_title, 26f, COLOR_PRIMARY, true));
 
-        progress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        progress.setMax(100);
-        progress.setProgressTintList(ColorStateList.valueOf(ACCENT));
-        FrameLayout.LayoutParams progressParams =
-                new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3));
-        progressParams.gravity = Gravity.TOP;
-        progress.setLayoutParams(progressParams);
+        TextView subtitle = text(R.string.setup_subtitle, 13f, COLOR_SECONDARY, false);
+        subtitle.setLineSpacing(dp(3), 1f);
+        addFill(root, subtitle, 8);
 
-        errorPanel = buildErrorPanel();
-        errorPanel.setVisibility(View.GONE);
+        LinearLayout overlayCard = card();
+        addFill(overlayCard, text(R.string.perm_overlay_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(overlayCard, text(R.string.perm_overlay_desc, 13f, COLOR_SECONDARY, false), 6);
+        overlayState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(overlayCard, overlayState, 10);
+        addTop(overlayCard, button(R.string.grant, v -> Perms.openOverlaySettings(this)), 12);
+        addFill(root, overlayCard, 24);
 
-        root.addView(web);
-        root.addView(progress);
-        root.addView(errorPanel);
-        setContentView(root);
+        LinearLayout accessCard = card();
+        addFill(accessCard, text(R.string.perm_access_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(accessCard, text(R.string.perm_access_desc, 13f, COLOR_SECONDARY, false), 6);
+        accessState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(accessCard, accessState, 10);
+        addTop(accessCard, button(R.string.grant, v -> Perms.openNotificationAccessSettings(this)), 12);
+        addFill(root, accessCard, 14);
 
-        if (savedInstanceState == null) {
-            web.loadUrl(START_URL);
-        } else {
-            web.restoreState(savedInstanceState);
-        }
-    }
+        LinearLayout serviceCard = card();
+        addFill(serviceCard, text(R.string.state_title, 16f, COLOR_PRIMARY, true), 0);
+        serviceState = text(R.string.service_off, 13f, COLOR_IDLE, true);
+        addFill(serviceCard, serviceState, 8);
+        startStop = button(R.string.start, v -> toggleService());
+        addTop(serviceCard, startStop, 12);
+        addTop(serviceCard, button(R.string.preview, v -> preview()), 8);
+        addFill(root, serviceCard, 14);
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private void configure(WebSettings settings) {
-        // The island is a client component with spring motion; it needs JS, storage and modern APIs.
-        settings.setJavaScriptEnabled(true);
-        settings.setDomStorageEnabled(true);
-        settings.setDatabaseEnabled(true);
-        settings.setLoadsImagesAutomatically(true);
-        settings.setSupportZoom(false);
-        settings.setBuiltInZoomControls(false);
-        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
-        settings.setUserAgentString(settings.getUserAgentString() + " islandcn-web/1.0");
+        TextView miui = text(R.string.miui_hint, 12f, 0xFF8A8A94, false);
+        miui.setLineSpacing(dp(3), 1f);
+        addFill(root, miui, 22);
 
-        // The site follows prefers-color-scheme, so let the WebView report the system theme.
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            settings.setAlgorithmicDarkeningAllowed(true);
-        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            forceDark(settings);
-        }
-    }
-
-    @SuppressWarnings("deprecation")
-    private void forceDark(WebSettings settings) {
-        settings.setForceDark(WebSettings.FORCE_DARK_AUTO);
-    }
-
-    private View buildErrorPanel() {
-        LinearLayout panel = new LinearLayout(this);
-        panel.setOrientation(LinearLayout.VERTICAL);
-        panel.setGravity(Gravity.CENTER);
-        panel.setBackgroundColor(Color.BLACK);
-        panel.setPadding(dp(32), dp(32), dp(32), dp(32));
-        panel.setLayoutParams(
-                new FrameLayout.LayoutParams(
-                        ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
-        errorText = new TextView(this);
-        errorText.setText(R.string.offline_message);
-        errorText.setTextColor(0xFFEDEDED);
-        errorText.setTextSize(16f);
-        errorText.setGravity(Gravity.CENTER);
-        errorText.setLineSpacing(dp(4), 1f);
-
-        Button retry = new Button(this);
-        retry.setText(R.string.retry);
-        retry.setOnClickListener(
-                v -> {
-                    errorPanel.setVisibility(View.GONE);
-                    web.setVisibility(View.VISIBLE);
-                    web.loadUrl(START_URL);
-                });
-
-        LinearLayout.LayoutParams buttonParams =
-                new LinearLayout.LayoutParams(
-                        ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        buttonParams.topMargin = dp(16);
-
-        panel.addView(errorText);
-        panel.addView(retry, buttonParams);
-        return panel;
-    }
-
-    private int dp(int value) {
-        return Math.round(value * getResources().getDisplayMetrics().density);
-    }
-
-    private boolean isSiteHost(Uri uri) {
-        String host = uri.getHost();
-        return host != null && (host.equals(SITE_HOST) || host.endsWith("." + SITE_HOST));
-    }
-
-    private final class SiteClient extends WebViewClient {
-
-        @Override
-        public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
-            Uri uri = request.getUrl();
-            if (uri == null) {
-                return false;
-            }
-            if (isSiteHost(uri)) {
-                return false;
-            }
-            // Anything else (mail, X, GitHub) belongs to the system, not to this shell.
-            try {
-                startActivity(new Intent(Intent.ACTION_VIEW, uri));
-            } catch (ActivityNotFoundException ignored) {
-                // No handler installed; staying put is the better outcome.
-            }
-            return true;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 1);
         }
 
-        @Override
-        public void onPageFinished(WebView view, String url) {
-            progress.setVisibility(View.GONE);
-        }
-
-        @Override
-        public void onReceivedError(
-                WebView view, WebResourceRequest request, WebResourceError error) {
-            if (!request.isForMainFrame()) {
-                return;
-            }
-            web.setVisibility(View.GONE);
-            errorPanel.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private final class ProgressClient extends WebChromeClient {
-
-        @Override
-        public void onProgressChanged(WebView view, int newProgress) {
-            progress.setVisibility(newProgress >= 100 ? View.GONE : View.VISIBLE);
-            progress.setProgress(newProgress);
-        }
-    }
-
-    @Override
-    public void onBackPressed() {
-        if (web.canGoBack()) {
-            web.goBack();
-            return;
-        }
-        super.onBackPressed();
-    }
-
-    @Override
-    protected void onSaveInstanceState(Bundle outState) {
-        super.onSaveInstanceState(outState);
-        web.saveState(outState);
-    }
-
-    @Override
-    protected void onPause() {
-        web.onPause();
-        super.onPause();
+        refreshState();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        web.onResume();
+        refreshState();
     }
 
-    @Override
-    protected void onDestroy() {
-        web.destroy();
-        super.onDestroy();
+    private void refreshState() {
+        boolean overlay = Perms.canOverlay(this);
+        overlayState.setText(overlay ? R.string.granted : R.string.missing);
+        overlayState.setTextColor(overlay ? COLOR_OK : COLOR_MISSING);
+
+        boolean access = Perms.hasNotificationAccess(this);
+        accessState.setText(access ? R.string.granted : R.string.missing);
+        accessState.setTextColor(access ? COLOR_OK : COLOR_MISSING);
+
+        boolean running = IslandService.isRunning();
+        serviceState.setText(running ? R.string.service_on : R.string.service_off);
+        serviceState.setTextColor(running ? COLOR_OK : COLOR_IDLE);
+        startStop.setText(running ? R.string.stop_island : R.string.start);
+    }
+
+    private void toggleService() {
+        if (IslandService.isRunning()) {
+            stopService(new Intent(this, IslandService.class));
+            startStop.postDelayed(this::refreshState, 300);
+            return;
+        }
+        if (!Perms.canOverlay(this)) {
+            toast(R.string.need_overlay);
+            Perms.openOverlaySettings(this);
+            return;
+        }
+        startForegroundService(new Intent(this, IslandService.class));
+        startStop.postDelayed(this::refreshState, 700);
+    }
+
+    private void preview() {
+        if (!IslandService.isRunning()) {
+            toast(R.string.preview_hint);
+            return;
+        }
+        IslandBridge.post(IslandEvent.preview(this));
+    }
+
+    private void toast(int resId) {
+        Toast.makeText(this, resId, Toast.LENGTH_LONG).show();
+    }
+
+    private LinearLayout card() {
+        LinearLayout layout = new LinearLayout(this);
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setBackground(rounded(COLOR_CARD, 18f));
+        layout.setPadding(dp(16), dp(16), dp(16), dp(16));
+        return layout;
+    }
+
+    private Button button(int resId, View.OnClickListener listener) {
+        Button button = new Button(this);
+        button.setText(resId);
+        button.setAllCaps(false);
+        button.setTextColor(COLOR_PRIMARY);
+        button.setBackground(rounded(0xFF23232B, 12f));
+        button.setPadding(dp(18), dp(8), dp(18), dp(8));
+        button.setOnClickListener(listener);
+        return button;
+    }
+
+    private TextView text(int resId, float size, int color, boolean bold) {
+        TextView view = new TextView(this);
+        view.setText(resId);
+        view.setTextSize(size);
+        view.setTextColor(color);
+        if (bold) {
+            view.setTypeface(Typeface.DEFAULT_BOLD);
+        }
+        return view;
+    }
+
+    private GradientDrawable rounded(int color, float radiusDp) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.RECTANGLE);
+        drawable.setColor(color);
+        drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
+    }
+
+    private void addFill(LinearLayout parent, View child, float topDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.topMargin = dp(topDp);
+        parent.addView(child, params);
+    }
+
+    private void addTop(LinearLayout parent, View child, float topDp) {
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.topMargin = dp(topDp);
+        parent.addView(child, params);
+    }
+
+    private int dp(float value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
     }
 }

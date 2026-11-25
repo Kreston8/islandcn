@@ -1,12 +1,12 @@
 name: Build Android APK
 
 # islandcn is a Next.js site plus a shadcn registry, so there is no Android project upstream.
-# This workflow builds the thin WebView shell in android/ and publishes the APK to a release.
+# This workflow builds the native overlay island in android/ and publishes the APK to a release.
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for apk-v1.0.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.0.<run number>)"
         required: false
         default: ""
   push:
@@ -50,19 +50,19 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-            -PversionName="1.0.${{ github.run_number }}"
+            -PversionName="2.0.${{ github.run_number }}"
 
       - name: Collect APK
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-             "dist/islandcn-web-1.0.${{ github.run_number }}.apk"
+             "dist/islandcn-island-2.0.${{ github.run_number }}.apk"
           ls -l dist
-          unzip -l dist/*.apk | head -20
+          unzip -l dist/*.apk | head -30
 
       - uses: actions/upload-artifact@v4
         with:
-          name: islandcn-web-apk
+          name: islandcn-island-apk
           path: dist/*.apk
 
       - name: Publish release
@@ -70,9 +70,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="apk-v1.0.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.0.${{ github.run_number }}"; fi
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk \
-            --title "islandcn Web APK $TAG" \
-            --notes "Sideload APK for islandcn.dev, built from the WebView shell in \`android/\`." \
+            --title "islandcn 灵动岛 $TAG" \
+            --notes "Native overlay island for Android: SYSTEM_ALERT_WINDOW pill above other apps, NotificationListenerService feed, no WebView and no network access. Sideload build, debug-key signed." \
             || gh release upload "$TAG" dist/*.apk --clobber
