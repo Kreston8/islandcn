@@ -77,4 +77,57 @@
     <string name="perm_usage_desc">用来判断现在在不在桌面，从而让音乐卡片只在桌面显示、进任何 App 都收起。只有音乐在播放时才会每 2.5 秒查询一次，暂停、锁屏后完全停止。这项必须授权，「只在桌面显示」才生效；不授权时卡片会在所有界面上显示。</string>
 
     <string name="miui_hint">MIUI / HyperOS 提示：除上面几项权限，还需要在「应用管理 → islandcn 灵动岛 → 权限」里打开「后台弹出界面」，否则从后台弹不出胶囊。锁屏时系统会隐藏悬浮窗，这是系统限制。</string>
+    <string name="label_bt">蓝牙设备电量</string>
+    <string name="bt_hint">配对的手表、耳机连上后显示在胶囊最右端：上面是设备图标，下面是它自己上报的电量。Android 没有公开的蓝牙电量接口，百分比来自系统把设备电量转发出来的那次广播，所以刚打开可能只看到图标，等设备下次上报（一般连上时就会报一次）才出现数字。最多同时显示 3 个设备。</string>
+    <string name="perm_bt_title">6. 附近设备（蓝牙）</string>
+    <string name="perm_bt_desc">用来列出已连接的蓝牙设备和它们的名称。不授权也能用，只是拿不到设备名，图标会退回通用样式。</string>
+    <string name="label_standby">桌面常驻</string>
+    <string name="standby_hint">打开后，只要没有别的卡片在显示、并且停在桌面，胶囊就一直在：按下面设定的顺序显示天气温度、小狗头、每日一句。小狗头会轻轻左右摇。进任何 App 就收起，回到桌面再出现。</string>
+    <string name="label_standby_weather">天气温度</string>
+    <string name="label_standby_puppy">小狗头</string>
+    <string name="label_standby_quote">每日一句</string>
+    <string name="standby_order_title">显示顺序</string>
+    <string name="standby_move_up">上移</string>
+    <string name="standby_move_down">下移</string>
+    <string name="weather_city_title">天气城市</string>
+    <string name="weather_city_hint">没设置城市时不显示温度</string>
+    <string name="weather_city_desc">填一个城市名（如 北京、杭州）换当前气温。走 Open-Meteo 的公开接口：城市名先换经纬度，再取气温，HTTPS、6 秒超时、只放内存。这是「联网歌词」之外唯一会联网的地方，不用天气就一次都不请求；也不需要定位权限。</string>
+    <string name="weather_city_set">设置城市</string>
+    <string name="weather_failed">天气获取失败</string>
+    <string name="standby_need_usage">桌面常驻需要「使用情况访问」权限，否则判断不了是不是在桌面。</string>
+    <string name="standby_empty">常驻内容全关了，先在下面打开至少一项。</string>
+    <string-array name="quotes">
+        <item>今天多走一步，明天就少慌一点。</item>
+        <item>慢一点没关系，别停就行。</item>
+        <item>把该做的事做完，运气会自己找上来。</item>
+        <item>你不需要很厉害才能开始，开始了才会很厉害。</item>
+        <item>情绪会过去，事情会留下，先做事。</item>
+        <item>每天进步 1%，一年后是 37 倍。</item>
+        <item>先完成，再完美。</item>
+        <item>没有人一开始就擅长，重复就是天赋。</item>
+        <item>今天偷的懒，明天都会加倍还回来。</item>
+        <item>别等状态好，状态是做出来的。</item>
+        <item>把注意力放回手上的这一件事。</item>
+        <item>你已经走了很远，别在最后一段松手。</item>
+        <item>早睡是成年人最便宜的自律。</item>
+        <item>不是所有努力马上有回声，但一定有。</item>
+        <item>允许自己慢，不允许自己烂。</item>
+        <item>解决一个小问题，就少一个烦心事。</item>
+        <item>想做的事，今天先做五分钟。</item>
+        <item>守时、守信、守嘴，日子会顺很多。</item>
+        <item>把复杂的事拆开，就没那么可怕。</item>
+        <item>今天的你，比昨天的你多懂一点就够。</item>
+        <item>不要用明天的焦虑，花掉今天的力气。</item>
+        <item>认真吃饭，认真睡觉，认真挣钱。</item>
+        <item>该拒绝的时候拒绝，是给自己留力气。</item>
+        <item>把喜欢的事做久一点，它会长出意义。</item>
+        <item>再撑一下，转机常在你想放弃之后。</item>
+        <item>身体是本钱，别拿它换进度。</item>
+        <item>与其焦虑，不如先做完手上的十分钟。</item>
+        <item>善待自己，才有余力善待别人。</item>
+        <item>清楚自己要什么，剩下的都好办。</item>
+        <item>今天是余生里最年轻的一天。</item>
+    </string-array>
+    <string name="bt_unknown">蓝牙设备</string>
+    <string name="label_standby_enable">开启桌面常驻</string>
 </resources>

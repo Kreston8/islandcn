@@ -1,11 +1,13 @@
 # islandcn 灵动岛 for Android
 
+English | [中文说明](README.zh.md)
+
 Upstream islandcn is a Next.js site plus a shadcn registry, not a native app. This folder is a
 native Android app that borrows the look of the island: a black pill sits at the top of the screen,
 springs open when a notification arrives, and collapses on its own.
 
-It replaced an earlier WebView shell. Nothing here loads a web page. The only socket in the app is the
-optional lyric lookup described below, which is why `INTERNET` is declared at all.
+It replaced an earlier WebView shell. Nothing here loads a web page. Two optional HTTPS lookups
+exist — per-line lyrics and a temperature — and both are described below with their limits.
 
 ## What it shows
 
@@ -30,11 +32,40 @@ body line instead of adding a third one.
 The code rows copy to the clipboard and collapse the island; the notification itself is left in the
 shade so the copy is never destructive.
 
+### Bluetooth battery chips
+
+When 蓝牙设备电量 is on, the right end of the pill shows one chip per connected accessory — watch,
+earbuds, anything else — as an icon with the percentage underneath, up to three devices. The chips
+appear on every card, including the music/lyric strip, and the pill widens instead of squeezing the
+text.
+
+Android has no public battery API for accessories. The percentage is whatever the device last pushed
+through the platform's own `BATTERY_LEVEL_CHANGED` broadcast, so:
+
+- a device that has never reported keeps its icon and shows `--`, because a wrong number on a watch is
+  worse than none;
+- after a fresh install the numbers only appear once a device reports again (typically at connect);
+- the app never opens a GATT connection to read a level — doing that to earbuds disturbs playback.
+
+### Standby pill (桌面常驻)
+
+When 桌面常驻 is on and nothing else is on screen, a second, narrower pill stays on the launcher with
+the items you enabled:
+
+- **天气温度** — the current temperature, e.g. `23°`. Needs a city name typed in the app; there is no
+  location permission and no GPS.
+- **小狗头** — the golden-retriever head, swaying about 7° left and right on a 900 ms loop.
+- **每日一句** — one line of encouragement, chosen by day of year so it changes once a day.
+
+The three items can be reordered with 上移 / 下移, and the pill disappears the moment a card appears,
+the launcher is no longer in front, or the screen is locked.
+
 ## How it works
 
 - `IslandService` (`IslandService.java`) is a foreground service that owns one
-  `TYPE_APPLICATION_OVERLAY` window. The window is `WRAP_CONTENT`, so animating the card's layout
-  params is what grows and shrinks it, and `Gravity.TOP | CENTER_HORIZONTAL` keeps it centred.
+  `TYPE_APPLICATION_OVERLAY` window, plus a second one for the standby pill. Both are `WRAP_CONTENT`,
+  so animating the card's layout params is what grows and shrinks them, and
+  `Gravity.TOP | CENTER_HORIZONTAL` keeps them centred.
 - `IslandListener` (`IslandListener.java`) is a `NotificationListenerService`. It drops group
   summaries, ongoing events and its own status notification, then hands title, body, icon and
   content intent to the island.
@@ -55,9 +86,16 @@ shade so the copy is never destructive.
   for codes, pickup numbers and delivery ETAs.
 - `IslandView` draws the pill and the expanded card with plain platform views, cross-fading the
   content while the corner radius interpolates from a pill to a card. `OvershootInterpolator` gives
-  the spring. Every card is the same 44 dp strip — icon, one bold line, one body line — so a
-  copyable code sits in the title row rather than on a row of its own, and a countdown takes over the
-  body line instead of adding a third one.
+  the spring. Every card is the same 44 dp strip, which is why a copyable code sits in the title row
+  and a countdown takes over the body line.
+- `BtWatcher` (`BtWatcher.java`) listens for the hidden `BATTERY_LEVEL_CHANGED` broadcast, keeps the
+  last known level per device address in `SharedPreferences`, and lists connected devices through
+  `BluetoothManager.getConnectedDevices` for the `GATT` and `HEADSET` profiles. Every call is guarded:
+  without `BLUETOOTH_CONNECT` it returns nothing instead of crashing the overlay.
+- `StandbyView` (`StandbyView.java`) renders the standby pill and owns the temperature lookup:
+  geocoding (`geocoding-api.open-meteo.com`) turns the typed city into coordinates, then
+  `api.open-meteo.com/v1/forecast?current=temperature_2m` returns one number. 6 s timeout, memory
+  cache for 30 minutes, one request in flight, nothing requested without a city.
 - `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
   process.
 - `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
@@ -66,9 +104,10 @@ shade so the copy is never destructive.
   query that resolves the foreground package against every `CATEGORY_HOME` handler — anything that is
   not the launcher hides the strip — and it runs only while a session is playing: pause, screen off
   or a missing usage-access grant cancels it. One card per track.
-- `Prefs` (`Prefs.java`) is the switch store: one boolean per card kind plus `on_lyrics` for the
-  lyric lookup. `IslandService.onIslandEvent` drops a card whose switch is off before the overlay is
-  touched at all.
+- `Prefs` (`Prefs.java`) is the switch store: one boolean per card kind, `on_lyrics` for the lyric
+  lookup, `on_bt` for the battery chips, `on_standby` plus three item switches and an order string for
+  the standby pill. `IslandService.onIslandEvent` drops a card whose switch is off before the overlay
+  is touched at all.
 - `Lyric` parses LRC (`[mm:ss.cc]` lines, credit lines filtered out) and answers "which line at this
   position" by binary search; `LyricSource` does the one HTTPS lookup per track with a 6 s timeout,
   a 512 KB cap and a 16 entry memory-only cache.
@@ -88,6 +127,19 @@ when the reported position drifts more than 700 ms from the running estimate, LR
 tags are applied, and a lyric whose total length is far from the track duration (a different
 recording) is dropped instead of shown out of sync.
 
+## The switches
+
+Every feature has its own switch in the app, 10 for the cards plus the additions:
+
+| Switch | Default | Effect |
+|---|---|---|
+| one per card kind | on | whether that kind of card may appear |
+| 联网歌词 | on | the one lyric lookup per track |
+| 蓝牙设备电量 | off | battery chips at the right end of the pill |
+| 桌面常驻 | off | the standby pill on the launcher |
+| 天气温度 / 小狗头 / 每日一句 | on | which items the standby pill contains |
+| 城市 | empty | no city means no weather request at all |
+
 ## Permissions the user has to grant
 
 1. **Display over other apps** (`SYSTEM_ALERT_WINDOW`) for the overlay itself.
@@ -95,12 +147,14 @@ recording) is dropped instead of shown out of sync.
 3. **SMS** (`RECEIVE_SMS`), optional, for codes that never reach the shade.
 4. **Phone** (`READ_PHONE_STATE`), optional, for incoming-call cards. On Android 12+ the card still
    says 未知号码, because the caller id is no longer shared with third-party apps.
-5. **Usage access** (`PACKAGE_USAGE_STATS`), optional but required for the desktop-only rule: it is
-   how the music strip knows the launcher is in front. One cheap query every 2.5 s, only while a
-   track is actually playing.
-6. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
+5. **Usage access** (`PACKAGE_USAGE_STATS`), optional but required for the desktop-only rule and for
+   the standby pill: it is how the app knows the launcher is in front. One cheap query every 2.5 s
+   while a track plays, and one every 4 s while the standby pill is active.
+6. **Nearby devices** (`BLUETOOTH_CONNECT`), optional and only asked for on Android 12+, for the names
+   and the connected-device list behind the battery chips.
+7. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
    started from the background.
-7. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
+8. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
    notification.
 
 ## What it is not
@@ -117,28 +171,24 @@ recording) is dropped instead of shown out of sync.
 - The 闹钟 card is a heads-up about fifteen minutes early; when the alarm fires, the clock app's
   full-screen intent covers everything. The card is withdrawn a minute after the alarm time, and
   `AlarmWatcher.schedule` retracts it as soon as `getNextAlarmClock()` stops reporting that exact
-  alarm, so a reminder cannot outlive the alarm it describes. One alarm is announced once: the
-  trigger time is remembered in `Prefs.KEY_ALARM_SHOWN`, so a service restart cannot repeat it.
+  alarm. One alarm is announced once: the trigger time is remembered in `Prefs.KEY_ALARM_SHOWN`.
   A ROM that keeps reporting an alarm the clock app no longer lists would still produce one card;
   the 闹钟 switch is the way out of that.
-- 导航 depends on the map app publishing the next turn as an ongoing notification, and it refreshes
-  every few seconds while driving — the island only shows the latest line.
+- 导航 depends on the map app publishing the next turn as an ongoing notification. The island only
+  shows the latest line.
+- 音乐 shows what the player publishes. Real per-line lyrics are not obtainable offline: 网易云音乐
+  keeps its lyrics inside its own UI and puts nothing in the media session, so the line comes from the
+  public endpoint on `music.163.com` over HTTPS, once per track, only while 联网歌词 is on, capped at
+  512 KB, cached in memory only. That endpoint gives one timestamp per line, not per syllable, so the
+  character-by-character light-up is interpolated linearly inside each line: it shows which line is
+  being sung and roughly how far into it the singer is, not word accuracy. When the lookup fails or
+  the switch is off, that line shows the song name instead.
+- The music strip and the standby pill are **desktop only** and need the **usage access** grant;
+  without it the app cannot tell the launcher from an app, so the strip falls back to showing over any
+  screen and the standby pill never appears.
+- The temperature needs a city typed by hand and hits Open-Meteo; the accessory percentage needs the
+  device to report and `BLUETOOTH_CONNECT`. Neither is a promise the system makes.
 
-
-- 音乐 shows what the player publishes — title, artist, album art. Real per-line lyrics are not
-  obtainable offline: 网易云音乐 keeps its lyrics inside its own UI and puts nothing in the media
-  session, and reading that UI is pointless here because the card is hidden exactly while that UI is
-  on screen. So the lyric line comes from the public lyrics endpoint on `music.163.com` over HTTPS,
-  once per track, only while the 联网歌词 switch is on, capped at 512 KB, cached in memory only and
-  dropped when the track changes or the service stops.
-
-  That endpoint gives one timestamp per line, not per syllable, so the character-by-character light
-  up is interpolated linearly inside each line. It shows which line is being sung and roughly how far
-  into it the singer is; it is not word accurate. When the lookup fails, or the switch is off, that
-  single line shows the song name instead.
-- The music strip is **desktop only** (see below) and needs the **usage access** grant for that:
-  without it the app cannot tell the launcher from an app, so the strip falls back to showing over
-  any screen. The foreground query is one cheap call every 2.5 s, and only while a track plays.
 ## Build
 
 Locally, with JDK 17 and the Android SDK (`compileSdk 34`):
@@ -166,16 +216,20 @@ APK and attaches it to a GitHub release.
    特殊权限 → 安装未知应用).
 3. Open the app, grant the permissions, press 启动灵动岛, then 预览效果.
 
+## Version numbers
+
+`versionName` is `2.<batch>.<run>`, `versionCode` is the workflow run number, and the release tag is
+`island-v2.<batch>.<run>`. The middle digit is bumped once per feature batch, so released series skip
+numbers: failed runs never ship, and each batch starts a new middle digit on purpose.
+
 ## Which download for which phone
 
 One APK. There is nothing to choose: the app is plain Java in `classes.dex` with no native code, so
-there is no `lib/` folder and therefore no per-ABI split, and the only device-specific decision is
+there is no `lib/` folder and therefore no per-ABI split, and the only device-specific decisions are
 made at runtime (the launcher package is resolved through `CATEGORY_HOME`, the foreground package
 through `UsageEvents`). `minSdk 26` means Android 8.0 and newer; `compileSdk`/`targetSdk 34` means it
 is built and checked against Android 14. That one file installs on 小米 / 红米 / POCO with MIUI 12-14
 or HyperOS, and on other skins, with the caveats listed above.
 
 Splitting it per system would only be packaging theatre: the differences between those phones are
-permissions the user grants and runtime detection, not code that can be compiled out. If a future
-feature genuinely needs different code (an OEM SDK, a native library), that is when a second APK
-becomes honest.
+permissions the user grants and runtime detection, not code that can be compiled out.

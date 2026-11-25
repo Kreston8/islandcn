@@ -58,6 +58,9 @@ public final class IslandView extends FrameLayout {
     private static final int H_MUSIC_DP = 44;
     private static final int W_MUSIC_MAX_DP = 232;
     private static final long LYRIC_MS = 100L;
+    private static final int BT_MAX = 3;
+    /** Roughly one chip: the icon is 14 dp, the percentage under it a little wider. */
+    private static final int BT_CHIP_DP = 26;
 
     private final float density;
     private final int expandedWidthPx;
@@ -73,6 +76,7 @@ public final class IslandView extends FrameLayout {
     private final LinearLayout copyRow;
     private final TextView codeView;
     private final TextView countdownView;
+    private final LinearLayout btRow;
 
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = this::updateCountdown;
@@ -81,6 +85,8 @@ public final class IslandView extends FrameLayout {
     private ValueAnimator animator;
     private float fraction;
     private boolean expanded;
+    /** True while the card is the slim music strip, which sizes and pads differently. */
+    private boolean musicMode;
     private Actions actions;
     private float touchDownY;
     private boolean swipedAway;
@@ -224,6 +230,16 @@ public final class IslandView extends FrameLayout {
         countdownParams.topMargin = dp(1);
         column.addView(countdownView, countdownParams);
 
+        btRow = new LinearLayout(context);
+        btRow.setOrientation(LinearLayout.HORIZONTAL);
+        btRow.setGravity(Gravity.CENTER_VERTICAL);
+        btRow.setVisibility(View.GONE);
+        LinearLayout.LayoutParams btParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        btParams.leftMargin = dp(4);
+        // Right end of the pill, before the close button.
+        expandedBox.addView(btRow, btParams);
+
         TextView close = new TextView(context);
         close.setText("\u00d7");
         close.setTextColor(0xFF8A8A94);
@@ -276,6 +292,7 @@ public final class IslandView extends FrameLayout {
         }
         boolean music = event.kind == IslandEvent.KIND_MUSIC;
         setMusicMode(music);
+        renderBt(event.bt);
         if (event.icon != null) {
             appIcon.setImageBitmap(event.icon);
             collapsedIcon.setImageBitmap(event.icon);
@@ -466,6 +483,7 @@ public final class IslandView extends FrameLayout {
      */
     private void setMusicMode(boolean music) {
         LinearLayout.LayoutParams icon = (LinearLayout.LayoutParams) appIcon.getLayoutParams();
+        musicMode = music;
         if (music) {
             headerRow.setVisibility(View.GONE);
             tagView.setVisibility(View.GONE);
@@ -587,6 +605,59 @@ public final class IslandView extends FrameLayout {
         collapsedIcon.setVisibility(clamped > 0.55f ? View.INVISIBLE : View.VISIBLE);
     }
 
+    /**
+     * Draws one chip per connected Bluetooth device, up to {@link #BT_MAX}.
+     *
+     * <p>Android exposes no public battery API for accessories: the percentage is whatever the
+     * device last pushed through the system's own broadcast. A device that never reported one
+     * keeps its icon and shows {@code --} instead of inventing a number.
+     */
+    private void renderBt(java.util.List<IslandEvent.Bt> devices) {
+        btRow.removeAllViews();
+        int count = devices == null ? 0 : Math.min(devices.size(), BT_MAX);
+        int maxWidthPx = getResources().getDisplayMetrics().widthPixels - dp(24);
+        if (count == 0) {
+            btRow.setVisibility(View.GONE);
+            cardWidthPx = Math.min(maxWidthPx, musicMode ? musicWidthPx : expandedWidthPx);
+            return;
+        }
+        for (int i = 0; i < count; i++) {
+            IslandEvent.Bt device = devices.get(i);
+            if (device == null) {
+                continue;
+            }
+            LinearLayout.LayoutParams chipParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i > 0) {
+                chipParams.leftMargin = dp(5);
+            }
+            btRow.addView(btChip(device), chipParams);
+        }
+        btRow.setVisibility(View.VISIBLE);
+        // The chips sit beside the text instead of eating it, so the pill grows by their width.
+        int base = musicMode ? musicWidthPx : expandedWidthPx;
+        cardWidthPx = Math.min(maxWidthPx, base + dp(BT_CHIP_DP) * count);
+    }
+
+    private View btChip(IslandEvent.Bt device) {
+        LinearLayout chip = new LinearLayout(getContext());
+        chip.setOrientation(LinearLayout.VERTICAL);
+        chip.setGravity(Gravity.CENTER_HORIZONTAL);
+        ImageView icon = new ImageView(getContext());
+        icon.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        icon.setImageResource(device.icon);
+        chip.addView(icon, new LinearLayout.LayoutParams(dp(14), dp(14)));
+        TextView percent = new TextView(getContext());
+        percent.setText(device.level < 0 ? "--" : device.level + "%");
+        percent.setTextColor(device.level >= 0 && device.level <= 20 ? 0xFFF0B860 : 0xFFB9B9C2);
+        percent.setTextSize(8.5f);
+        percent.setIncludeFontPadding(false);
+        percent.setSingleLine(true);
+        chip.addView(percent, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        chip.setContentDescription(device.name + " " + percent.getText());
+        return chip;
+    }
     private GradientDrawable rounded(int color, float radiusDp) {
         GradientDrawable drawable = new GradientDrawable();
         drawable.setShape(GradientDrawable.RECTANGLE);

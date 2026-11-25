@@ -57,6 +57,20 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private boolean alarmRegistered;
     private MediaWatcher mediaWatcher;
 
+    private BtWatcher btWatcher;
+    private boolean btRegistered;
+    private StandbyView standby;
+
+    private static final long STANDBY_POLL_MS = 4000L;
+
+    private final Runnable standbyTask = new Runnable() {
+        @Override
+        public void run() {
+            updateStandby();
+            handler.postDelayed(this, STANDBY_POLL_MS);
+        }
+    };
+
     private IslandEvent current;
     private String currentKey;
 
@@ -91,6 +105,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
         attachOverlay();
         startWatchers();
+
+        startStandby();
         return START_STICKY;
     }
 
@@ -102,6 +118,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         if (!Prefs.enabled(this, event.kind)) {
             return;
         }
+        event.bt(btChips());
+        hideStandby();
         if (island == null) {
             attachOverlay();
         }
@@ -145,6 +163,16 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             }
         }
         stopWatchers();
+
+        stopStandby();
+        if (standby != null && windowManager != null) {
+            try {
+                windowManager.removeView(standby);
+            } catch (Throwable ignored) {
+                // The window is already gone with the process.
+            }
+        }
+        standby = null;
         island = null;
         super.onDestroy();
     }
@@ -230,6 +258,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             // Nothing scheduled, or the clock service is unavailable.
         }
 
+        // Battery chips are only read when the switch is on; nothing polls while it is off.
+        startBt();
+
         // The music watcher is the only part that polls, so it is skipped entirely when off.
         if (!Prefs.enabled(this, IslandEvent.KIND_MUSIC)) {
             return;
@@ -259,10 +290,107 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
         alarmWatcher = null;
 
+        if (btRegistered && btWatcher != null) {
+            btWatcher.stop(this);
+            btRegistered = false;
+        }
+        btWatcher = null;
+
         if (mediaWatcher != null) {
             mediaWatcher.stop();
             mediaWatcher = null;
         }
+    }
+
+    private boolean attachStandby() {
+        if (standby != null) {
+            return true;
+        }
+        if (windowManager == null) {
+            return false;
+        }
+        StandbyView view = new StandbyView(this);
+        WindowManager.LayoutParams params = new WindowManager.LayoutParams();
+        params.width = WindowManager.LayoutParams.WRAP_CONTENT;
+        params.height = WindowManager.LayoutParams.WRAP_CONTENT;
+        params.type = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
+        params.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
+        params.format = PixelFormat.TRANSLUCENT;
+        params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+        params.y = statusBarHeight() + dp(4);
+        params.setTitle(getString(R.string.standby_order_title));
+        try {
+            windowManager.addView(view, params);
+        } catch (Throwable failure) {
+            return false;
+        }
+        standby = view;
+        return true;
+    }
+
+    /**
+     * Shows the standby pill only when it cannot fight with anything else on screen: the feature is
+     * on, no card is up, and the launcher is the app in front.
+     *
+     * <p>The check runs on a timer instead of watching for changes because "the launcher is in
+     * front" is only knowable from usage events, which have to be polled anyway.
+     */
+    private void updateStandby() {
+        if (!Prefs.opt(this, Prefs.KEY_STANDBY) || current != null) {
+            hideStandby();
+            return;
+        }
+        if (!Perms.hasUsageAccess(this) || !StandbyView.homeInFront(this)) {
+            hideStandby();
+            return;
+        }
+        if (!attachStandby()) {
+            return;
+        }
+        standby.setVisibility(standby.refresh() ? View.VISIBLE : View.INVISIBLE);
+    }
+
+    private void hideStandby() {
+        if (standby != null) {
+            standby.setVisibility(View.INVISIBLE);
+            standby.pause();
+        }
+    }
+
+    private void startStandby() {
+        handler.removeCallbacks(standbyTask);
+        handler.post(standbyTask);
+    }
+
+    private void stopStandby() {
+        handler.removeCallbacks(standbyTask);
+        hideStandby();
+    }
+
+    /** Opened, closed and reopened from the settings screen without restarting the service. */
+    private java.util.List<IslandEvent.Bt> btChips() {
+        if (!Prefs.opt(this, Prefs.KEY_BT) || btWatcher == null) {
+            return null;
+        }
+        try {
+            return btWatcher.chips(this);
+        } catch (Throwable failure) {
+            return null;
+        }
+    }
+
+    private void startBt() {
+        if (!Prefs.opt(this, Prefs.KEY_BT) || btRegistered) {
+            return;
+        }
+        if (btWatcher == null) {
+            btWatcher = new BtWatcher();
+        }
+        btWatcher.start(this);
+        btRegistered = true;
     }
 
     private void openCurrent() {

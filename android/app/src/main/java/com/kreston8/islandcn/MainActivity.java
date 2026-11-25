@@ -2,6 +2,7 @@ package com.kreston8.islandcn;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
@@ -12,6 +13,7 @@ import android.view.View;
 import android.view.Gravity;
 import android.widget.Switch;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -35,6 +37,9 @@ public final class MainActivity extends Activity {
     private TextView usageState;
     private TextView serviceState;
     private Button startStop;
+    private TextView btState;
+    private Button cityButton;
+    private LinearLayout orderBox;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -121,6 +126,35 @@ public final class MainActivity extends Activity {
         addFill(featuresCard, text(R.string.lyrics_hint, 12f, 0xFF8A8A94, false), 6);
         addFill(root, featuresCard, 14);
 
+        LinearLayout btCard = card();
+        addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(btCard, text(R.string.perm_bt_desc, 13f, COLOR_SECONDARY, false), 6);
+        btState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(btCard, btState, 10);
+        addTop(btCard, button(R.string.grant, v -> requestBluetooth()), 12);
+        switchRow(btCard, R.string.label_bt, Prefs.KEY_BT, false);
+        addFill(btCard, text(R.string.bt_hint, 12f, 0xFF8A8A94, false), 8);
+        addFill(root, btCard, 14);
+
+        LinearLayout standbyCard = card();
+        addFill(standbyCard, text(R.string.label_standby, 16f, COLOR_PRIMARY, true), 0);
+        addFill(standbyCard, text(R.string.standby_hint, 13f, COLOR_SECONDARY, false), 6);
+        switchRow(standbyCard, R.string.label_standby_enable, Prefs.KEY_STANDBY, false);
+        switchRow(standbyCard, R.string.label_standby_weather, Prefs.KEY_STANDBY_WEATHER);
+        switchRow(standbyCard, R.string.label_standby_puppy, Prefs.KEY_STANDBY_PUPPY);
+        switchRow(standbyCard, R.string.label_standby_quote, Prefs.KEY_STANDBY_QUOTE);
+        addFill(standbyCard, text(R.string.standby_order_title, 13f, COLOR_PRIMARY, true), 14);
+        orderBox = new LinearLayout(this);
+        orderBox.setOrientation(LinearLayout.VERTICAL);
+        addFill(standbyCard, orderBox, 0);
+        renderOrder();
+        cityButton = button(R.string.weather_city_set, v -> askCity());
+        addTop(standbyCard, cityButton, 12);
+        updateCity();
+        addFill(standbyCard, text(R.string.weather_city_desc, 12f, 0xFF8A8A94, false), 8);
+        addFill(standbyCard, text(R.string.standby_need_usage, 12f, 0xFF8A8A94, false), 6);
+        addFill(root, standbyCard, 14);
+
         TextView miui = text(R.string.miui_hint, 12f, 0xFF8A8A94, false);
         miui.setLineSpacing(dp(3), 1f);
         addFill(root, miui, 22);
@@ -160,6 +194,10 @@ public final class MainActivity extends Activity {
         boolean usage = Perms.hasUsageAccess(this);
         usageState.setText(usage ? R.string.granted : R.string.missing);
         usageState.setTextColor(usage ? COLOR_OK : COLOR_MISSING);
+
+        boolean bluetooth = canReadBluetooth();
+        btState.setText(bluetooth ? R.string.granted : R.string.missing);
+        btState.setTextColor(bluetooth ? COLOR_OK : COLOR_MISSING);
 
         boolean running = IslandService.isRunning();
         serviceState.setText(running ? R.string.service_on : R.string.service_off);
@@ -241,21 +279,33 @@ public final class MainActivity extends Activity {
             // The call watcher only registers when the service starts, so pick up the new grant.
             restartService();
         }
+        if (requestCode == 4 && IslandService.isRunning()) {
+            // The battery receiver registers with the service, so the new grant needs a restart.
+            restartService();
+        }
     }
 
     /** One settings row: label on the left, toggle on the right. */
     private void switchRow(LinearLayout parent, int labelRes, String key) {
+        switchRow(parent, labelRes, key, true);
+    }
+
+    /**
+     * @param defaultOn false for the two additions that change the shape of the island, so an
+     *                  existing install keeps the layout it already knows until asked otherwise.
+     */
+    private void switchRow(LinearLayout parent, int labelRes, String key, boolean defaultOn) {
         LinearLayout row = new LinearLayout(this);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
         row.addView(text(labelRes, 14f, COLOR_PRIMARY, false), new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         Switch toggle = new Switch(this);
-        toggle.setChecked(Prefs.get(this, key));
+        toggle.setChecked(defaultOn ? Prefs.get(this, key) : Prefs.opt(this, key));
         toggle.setOnCheckedChangeListener((button, checked) -> {
             Prefs.set(this, key, checked);
-            if (IslandService.isRunning()) {
-                // The music watcher only registers while its switch is on, so re-read the setting.
+            if (IslandService.isRunning() && !isStandbyKey(key)) {
+                // These watchers only register at start-up, so they need to be re-read.
                 restartService();
             }
         });
@@ -264,6 +314,98 @@ public final class MainActivity extends Activity {
         addFill(parent, row, 10);
     }
 
+    /** The standby switches are read on every timer tick, so toggling one needs no restart. */
+    private boolean isStandbyKey(String key) {
+        return Prefs.KEY_STANDBY.equals(key)
+                || Prefs.KEY_STANDBY_WEATHER.equals(key)
+                || Prefs.KEY_STANDBY_PUPPY.equals(key)
+                || Prefs.KEY_STANDBY_QUOTE.equals(key);
+    }
+
+    /** Rebuilds the order list: one row per item with 上移 / 下移, in the stored order. */
+    private void renderOrder() {
+        orderBox.removeAllViews();
+        String[] order = Prefs.order(this);
+        for (int i = 0; i < order.length; i++) {
+            final int index = i;
+            LinearLayout row = new LinearLayout(this);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.addView(text(labelOf(order[i]), 13f, COLOR_PRIMARY, false),
+                    new LinearLayout.LayoutParams(
+                            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+            row.addView(smallButton(R.string.standby_move_up, v -> move(index, -1)));
+            row.addView(smallButton(R.string.standby_move_down, v -> move(index, 1)));
+            addFill(orderBox, row, 8);
+        }
+    }
+
+    /** Swaps one item with its neighbour and stores the result as a comma list. */
+    private void move(int index, int delta) {
+        String[] order = Prefs.order(this);
+        int target = index + delta;
+        if (target < 0 || target >= order.length) {
+            return;
+        }
+        String swap = order[index];
+        order[index] = order[target];
+        order[target] = swap;
+        Prefs.setText(this, Prefs.KEY_STANDBY_ORDER, String.join(",", order));
+        renderOrder();
+    }
+
+    private int labelOf(String item) {
+        if ("weather".equals(item)) {
+            return R.string.label_standby_weather;
+        }
+        if ("puppy".equals(item)) {
+            return R.string.label_standby_puppy;
+        }
+        return R.string.label_standby_quote;
+    }
+
+    /** City for the temperature item; typing it is what turns that one request on. */
+    private void askCity() {
+        EditText input = new EditText(this);
+        input.setHint(R.string.weather_city_hint);
+        input.setText(Prefs.text(this, Prefs.KEY_CITY));
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.weather_city_title)
+                .setMessage(R.string.weather_city_desc)
+                .setView(input)
+                .setPositiveButton(R.string.weather_city_set, (dialog, which) -> {
+                    Prefs.setText(this, Prefs.KEY_CITY, input.getText().toString().trim());
+                    updateCity();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void updateCity() {
+        String city = Prefs.text(this, Prefs.KEY_CITY).trim();
+        cityButton.setText(city.isEmpty() ? R.string.weather_city_set : city);
+    }
+
+    private boolean canReadBluetooth() {
+        return Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+                || checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestBluetooth() {
+        if (canReadBluetooth()) {
+            toast(R.string.granted);
+            return;
+        }
+        requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, 4);
+    }
+
+    private Button smallButton(int resId, View.OnClickListener listener) {
+        Button button = button(resId, listener);
+        button.setTextSize(11f);
+        button.setPadding(dp(10), dp(4), dp(10), dp(4));
+        return button;
+    }
     private void toast(int resId) {
         Toast.makeText(this, resId, Toast.LENGTH_LONG).show();
     }

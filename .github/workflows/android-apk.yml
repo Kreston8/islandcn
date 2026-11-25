@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-            -PversionName="2.6.${{ github.run_number }}"
+             -PversionName="2.7.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-             "dist/islandcn-island-2.6.${{ github.run_number }}.apk"
+              "dist/islandcn-island-2.7.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,55 +97,25 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.6.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.7.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
           ## English
 
-          A native dynamic-island overlay for Android, drawn with SYSTEM_ALERT_WINDOW on top of other apps and driven by a NotificationListenerService. SMS verification and parcel pickup codes with one-tap copy, food-delivery countdown, Mi Notes to-do cards, incoming calls, a 15-minute alarm heads-up, navigation lines from whitelisted map apps, and a compact music strip with karaoke lyrics. Every feature has its own switch in the app.
-
-          **Supported systems and devices**
-          - Android 8.0 (API 26) and newer; built and checked against Android 14 (API 34). Not a system app: no root, no Xposed, no ADB required.
-          - Primary target: Xiaomi / Redmi / POCO on MIUI 12-14 or HyperOS (Android 11-14). MIUI additionally requires 后台弹出界面 ("show on screen while in background"), otherwise the system silently drops overlays raised from the background.
-          - Other skins (ColorOS, OriginOS, One UI, plain AOSP) run the basic cards, but aggressive background limits can kill the listener; add the app to the battery-optimisation whitelist.
-          - Music strip: 网易云音乐 (com.netease.cloudmusic) is the reference player. Any player that publishes a MediaSession shows title and artist, but the lyric lookup only covers the NetEase catalogue, matched by song title plus artist.
-
-          **There is only one APK, and it fits every supported phone.** No ABI split: the app is plain Java in classes.dex with no native code, so the package has no lib/ folder to split on and there is no arm/x86 choice to make. Device differences are resolved at runtime instead — the launcher package through CATEGORY_HOME, the foreground package through UsageEvents. Download the same file for MIUI, HyperOS, ColorOS, OriginOS, One UI or stock Android.
-
           **What is new in this build**
-          - **The phantom alarm card is gone.** A 闹钟 reminder could keep sitting on screen long after the alarm had rung, been moved or been switched off, which reads as an alarm you never set. Three guards now hold: the card is withdrawn a minute past the alarm time by its own follow-up wake-up; `getNextAlarmClock()` is re-read on every scheduling pass and the card is retracted the moment the system stops reporting that exact alarm; and the announced trigger time is remembered, so a service restart cannot announce the same alarm twice.
-          - **One height for every card: 44 dp, the height the music strip already had.** Icon, one bold line, one body line. Two lines are all that strip holds, so a copyable code now sits in the title row and a live countdown takes over the body line instead of adding a third row. Cards no longer change height between kinds.
-          - Still desktop-only for music, still re-anchoring the lyric clock when the player drifts, and still installable over 2.5.12 without uninstalling, because the signing key is unchanged.
+          - **Bluetooth battery chips.** With 蓝牙设备电量 on, the right end of the island shows one chip per connected accessory: the device icon on top, the percentage that device itself reported underneath, up to three devices. They also sit on the music/lyric strip, and the pill widens instead of squeezing the text.
+          - **A standby pill on the desktop (桌面常驻).** While nothing else is on screen it keeps the current temperature (23°), the golden-retriever head swaying gently left and right, and one encouraging line a day. Each item has its own switch and 上移 / 下移 reorders them.
+          - Both are off by default, so an existing install looks exactly as before until you turn them on. Signing is unchanged: this installs straight over 2.6.13.
 
-          **Honest limits**
-          - The alarm card can only reflect what the system reports. A ROM that keeps publishing an alarm the clock app no longer lists will still produce one card; the 闹钟 switch turns that source off completely.
-          - The lyric line is the only feature that opens a socket: HTTPS to music.163.com, once per track, only while the lyrics switch is on, 6 s timeout, 512 KB cap, memory-only cache.
-          - That endpoint carries one timestamp per line, so the character-by-character highlight is interpolated inside the line and will not match every syllable.
-          - The desktop-only rule needs Usage access; without it the strip is hidden rather than shown over apps.
-          - On Android 12+ the incoming-call card shows 未知号码: the caller id is no longer shared with third-party apps.
+          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`, so there is nothing to choose between. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Permissions, limits and the switches table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
 
           ## 中文
 
-          一个原生实现的安卓「灵动岛」：用 SYSTEM_ALERT_WINDOW 浮在其他应用之上，内容由 NotificationListenerService 驱动。短信验证码、取件码一键复制，外卖送达倒计时，小米笔记待办卡片，来电，提前 15 分钟的闹钟提醒，白名单地图应用的导航提示，以及紧凑、逐字高亮歌词的音乐条。每个功能都有独立开关。
-
-          **支持的系统与机型**
-          - Android 8.0（API 26）及以上，编译与校验目标 Android 14（API 34）。不是系统应用：不需要 root、不需要 Xposed、不需要连电脑。
-          - 主要适配：小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS（Android 11–14）。MIUI 上必须额外开启「后台弹出界面」，否则系统会静默拦截后台发起的悬浮窗。
-          - 其他系统（ColorOS、OriginOS、One UI、原生安卓）基础卡片可以正常用，但激进的后台限制可能杀掉监听服务，建议把本应用加入电池优化白名单。
-          - 音乐条：以网易云音乐（com.netease.cloudmusic）为基准播放器。任何发布 MediaSession 的播放器都能显示歌名和歌手，但歌词查询只覆盖网易云曲库，按歌名 + 歌手匹配。
-
-          **只有一个安装包，所有受支持的机型都下这一个。** 不做 ABI 拆分：应用是纯 Java（classes.dex），没有原生库，压缩包里没有 lib/ 目录，也就不存在 arm/x86 的选择；机型差异在运行时判断——桌面用 CATEGORY_HOME 解析，前台应用用 UsageEvents 判断。MIUI、HyperOS、ColorOS、OriginOS、One UI、原生安卓都是同一个文件。
-
           **本次更新**
-          - **闹钟幽灵提醒修好了。** 之前闹钟响过、改过或关掉之后，那张「闹钟」卡片还会一直留在屏幕上，看起来就像你从没设过的闹钟。现在三道保险：闹钟时间过一分钟由一次后续唤醒自动撤卡；每次重新排程都重读 getNextAlarmClock()，系统不再报这个具体闹钟就立刻撤卡；已提醒过的闹钟时间会被记下来，服务重启不会把同一个闹钟再报一遍。
-          - **所有卡片统一成 44 dp 高度**，就是音乐条现在的高度：一个图标、一行标题、一行正文。这个高度只放得下两行，所以可复制的验证码/取件码挪到标题行，倒计时直接占用正文那一行，不再多出一行。不同提醒之间的高度不再忽高忽低。
-          - 音乐仍然只在桌面显示，播放器时间戳漂移时仍会自动重新对齐；签名不变，可直接覆盖 2.5.12 安装。
+          - **蓝牙设备电量。** 打开后胶囊最右端每个已连接设备一个方块：上面是设备图标，下面是它自己上报的百分比，最多三个。「播放歌词时」也一起显示，胶囊变宽，不会把文字挤掉。
+          - **桌面常驻。** 屏幕上没有别的卡片时，桌面留一条窄胶囊：当前气温（23°）、轻微左右摇晃的金毛头像、每天一句励志话。三项各有开关，「上移 / 下移」调整前后顺序。
+          - 两项默认关闭，升级后外观和以前完全一样，想用再打开。签名未变，可直接覆盖 2.6.13 安装。
 
-          **如实说明的限制**
-          - 闹钟卡片只能反映系统上报的内容。如果某个 ROM 一直报一个时钟应用里其实不存在的闹钟，那张卡片仍会出现一次；彻底关掉请用「闹钟」开关。
-          - 唯一会联网的是歌词：HTTPS 访问 music.163.com，每首歌一次，仅在「联网歌词」开关打开时，6 秒超时、512 KB 上限、只放内存缓存。
-          - 该接口每行只有一个时间戳，逐字高亮是在行内插值推出来的，不会和每个字完全贴合。
-          - 只在桌面显示依赖「使用情况访问」权限；未授权时宁可不显示，也不会压在应用上面。
-          - Android 12 及以上，来电卡片显示「未知号码」：系统不再向第三方应用开放来电号码。
+          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`，不存在选哪个的问题。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

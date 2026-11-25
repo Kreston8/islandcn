@@ -6,9 +6,10 @@ import android.content.SharedPreferences;
 /**
  * The per-feature switches shown in the setup screen.
  *
- * <p>Everything defaults to on, so an existing install keeps behaving as before. Reads go through
- * the framework's in-memory preference map after the first load, which keeps the hot path (every
- * incoming card) free of disk I/O.
+ * <p>Card switches default to on, so an existing install keeps behaving as before; the two additions
+ * that change the desktop look (battery chips, standby pill) default to off and go through
+ * {@link #opt}. Reads go through the framework's in-memory preference map after the first load,
+ * which keeps the hot path (every incoming card) free of disk I/O.
  */
 final class Prefs {
 
@@ -26,6 +27,17 @@ final class Prefs {
     /** Not a card kind: the karaoke line itself, which is the only feature that opens a socket. */
     static final String KEY_LYRICS = "on_lyrics";
     static final String KEY_ALARM_SHOWN = "alarm_shown";
+
+    /** Bluetooth battery chips: off by default, each one widens the pill. */
+    static final String KEY_BT = "on_bt";
+    /** Desktop standby island and its three selectable items (items default to on). */
+    static final String KEY_STANDBY = "on_standby";
+    static final String KEY_STANDBY_WEATHER = "sb_weather";
+    static final String KEY_STANDBY_PUPPY = "sb_puppy";
+    static final String KEY_STANDBY_QUOTE = "sb_quote";
+    static final String KEY_STANDBY_ORDER = "sb_order";
+    /** City name typed by the user; the only reason the weather request is ever made. */
+    static final String KEY_CITY = "weather_city";
 
     private Prefs() {
     }
@@ -118,5 +130,53 @@ final class Prefs {
             default:
                 return KEY_GENERIC;
         }
+    }
+    /**
+     * True only when the user turned this on.
+     *
+     * <p>Used for the two additions that change what the island looks like on the desktop (battery
+     * chips, standby), so a fresh install keeps the old single-pill behaviour until asked.
+     */
+    static boolean opt(Context context, String key) {
+        try {
+            return store(context).getBoolean(key, false);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    static String text(Context context, String key) {
+        try {
+            String value = store(context).getString(key, "");
+            return value == null ? "" : value;
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    static void setText(Context context, String key, String value) {
+        try {
+            store(context).edit().putString(key, value).apply();
+        } catch (Throwable ignored) {
+            // A read-only profile keeps the previous value; the standby order still renders.
+        }
+    }
+
+    /** The standby order as written by the settings screen, e.g. {@code "puppy,weather,quote"}. */
+    static String[] order(Context context) {
+        String raw = text(context, KEY_STANDBY_ORDER);
+        if (raw.isEmpty()) {
+            return new String[]{"weather", "puppy", "quote"};
+        }
+        String[] parts = raw.split(",");
+        int count = 0;
+        for (String part : parts) {
+            if (part != null && !part.trim().isEmpty()) {
+                parts[count++] = part.trim();
+            }
+        }
+        String[] clean = new String[count];
+        System.arraycopy(parts, 0, clean, 0, count);
+        return count == 0 ? new String[]{"weather", "puppy", "quote"} : clean;
     }
 }

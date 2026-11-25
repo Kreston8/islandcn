@@ -21,9 +21,17 @@
         android:name="android.permission.PACKAGE_USAGE_STATS"
         tools:ignore="ProtectedPermissions" />
 
-    <!-- The one and only socket in this app: the lyric lookup against music.163.com over HTTPS,
-         only while a track is playing and only when the 联网歌词 switch is on. -->
+    <!-- Two sockets in total, both HTTPS and both behind their own switch: the lyric lookup
+         against music.163.com while a track plays, and the temperature lookup against the
+         Open-Meteo endpoints once a city has been typed in. Nothing else connects. -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Accessory names and the connected-device list. BLUETOOTH_CONNECT is a runtime grant on
+         Android 12+; the legacy permission covers the versions before it. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30" />
 
     <application
         android:allowBackup="false"
