@@ -353,8 +353,10 @@ final class MediaWatcher {
             return;
         }
         PlaybackState state = active.getPlaybackState();
-        if (state == null || state.getLastPositionUpdateTime() <= 0L) {
-            // No trustworthy clock to compare against, so the raw position stays authoritative.
+        long stamp = state.getLastPositionUpdateTime();
+        if (stamp <= 0L || SystemClock.elapsedRealtime() - stamp >= MAX_EXTRAPOLATE_MS) {
+            // No trustworthy clock to compare against, so the raw position stays authoritative and a
+            // comparison here would only re-post the same stale number on every poll.
             return;
         }
         long expected = anchorPos + (SystemClock.elapsedRealtime() - anchorAt);
