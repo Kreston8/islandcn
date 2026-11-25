@@ -9,6 +9,11 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Verification and pickup codes straight from the message, not the messaging app. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
+    <!-- Call cards. The number needs READ_PHONE_STATE; the platform only hands it out below 12. -->
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.READ_CALL_LOG" />
+    <!-- Read the next clock alarm so the card can appear a few minutes before it rings. -->
+    <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
 
     <application
         android:allowBackup="false"
@@ -54,6 +59,11 @@
                 <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
+
+        <!-- Only receives this app's own "alarm is close" pending intent. -->
+        <receiver
+            android:name=".AlarmWatcher"
+            android:exported="false" />
     </application>
 
 </manifest>

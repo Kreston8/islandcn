@@ -1,15 +1,19 @@
 package com.kreston8.islandcn;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.PendingIntent;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
+import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Telephony;
 import android.service.notification.StatusBarNotification;
+import android.text.format.DateUtils;
 
 /** One notification, reduced to what the island can draw. */
 final class IslandEvent {
@@ -19,6 +23,9 @@ final class IslandEvent {
     static final int KIND_PICKUP = 2;
     static final int KIND_DELIVERY = 3;
     static final int KIND_TODO = 4;
+    static final int KIND_CALL = 5;
+    static final int KIND_ALARM = 6;
+    static final int KIND_NAV = 7;
 
     private static final int ICON_PX = 96;
 
@@ -62,6 +69,21 @@ final class IslandEvent {
     }
 
     static IslandEvent from(Context context, StatusBarNotification sbn) {
+        return build(context, sbn, false);
+    }
+
+    /**
+     * A navigation prompt.
+     *
+     * <p>Map apps only publish their turn-by-turn line through an ongoing notification, which the
+     * listener normally drops, so the whitelisted ones come through this path and keep the
+     * navigation tag even when the wording happens to look like a delivery notice.
+     */
+    static IslandEvent navigation(Context context, StatusBarNotification sbn) {
+        return build(context, sbn, true);
+    }
+
+    private static IslandEvent build(Context context, StatusBarNotification sbn, boolean nav) {
         Notification notification = sbn.getNotification();
         if (notification == null) {
             return null;
@@ -89,6 +111,10 @@ final class IslandEvent {
                 label,
                 title == null ? null : title.toString(),
                 text == null ? null : text.toString());
+        int kind = nav ? KIND_NAV : parsed.kind;
+        // A nav line never carries a copyable code and has no countdown of its own.
+        String copy = nav ? null : parsed.code;
+        long eta = nav ? 0L : parsed.etaMillis;
         return new IslandEvent(
                 sbn.getKey(),
                 pkg,
@@ -98,9 +124,90 @@ final class IslandEvent {
                 text,
                 notification.contentIntent,
                 sbn.getPostTime(),
-                parsed.kind,
-                parsed.code,
-                parsed.etaMillis);
+                kind,
+                copy,
+                eta);
+    }
+
+    /**
+     * A call in progress or ringing.
+     *
+     * <p>{@code number} is null when the platform withholds it, which is always the case on
+     * Android 12 and newer: the call-state callback no longer includes the caller id.
+     */
+    static IslandEvent call(Context context, String number, boolean active) {
+        String known = number == null ? "" : number.trim();
+        String shown = known.isEmpty() ? context.getString(R.string.call_unknown) : known;
+        Intent dial = new Intent(Intent.ACTION_DIAL);
+        if (!known.isEmpty()) {
+            dial.setData(Uri.parse("tel:" + Uri.encode(known)));
+        }
+        PendingIntent open = null;
+        try {
+            open = PendingIntent.getActivity(
+                    context, 2, dial, PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+        } catch (Throwable ignored) {
+            // Without a pending intent the tap falls back to opening the phone app by package.
+        }
+        return new IslandEvent(
+                "call:" + shown + ":" + active,
+                null,
+                context.getString(R.string.tag_call),
+                bundledIcon(context, R.drawable.ic_phone),
+                shown,
+                context.getString(active ? R.string.call_active : R.string.call_incoming),
+                open,
+                System.currentTimeMillis(),
+                KIND_CALL,
+                null,
+                0L);
+    }
+
+    /** The next clock alarm; null when the clock has nothing scheduled. */
+    static IslandEvent alarm(Context context) {
+        AlarmManager manager;
+        try {
+            manager = (AlarmManager) context.getSystemService(Context.ALARM_SERVICE);
+        } catch (Throwable failure) {
+            return null;
+        }
+        if (manager == null) {
+            return null;
+        }
+        long trigger;
+        try {
+            AlarmManager.AlarmClockInfo info = manager.getNextAlarmClock();
+            trigger = info == null ? 0L : info.getTriggerTime();
+        } catch (Throwable failure) {
+            // Vendor ROMs without the alarm clock provider throw here.
+            return null;
+        }
+        long now = System.currentTimeMillis();
+        if (trigger <= now) {
+            return null;
+        }
+        String clock = DateUtils.formatDateTime(
+                context, trigger, DateUtils.FORMAT_SHOW_TIME | DateUtils.FORMAT_ABBREV_ALL);
+        return new IslandEvent(
+                "alarm:" + trigger,
+                context.getPackageName(),
+                context.getString(R.string.tag_alarm),
+                bundledIcon(context, R.drawable.ic_alarm),
+                context.getString(R.string.alarm_title, clock),
+                context.getString(R.string.alarm_text_soon),
+                null,
+                now,
+                KIND_ALARM,
+                null,
+                trigger);
+    }
+
+    private static Bitmap bundledIcon(Context context, int resId) {
+        try {
+            return toBitmap(context.getDrawable(resId), ICON_PX);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     /** An SMS the receiver classified as a code; returns null for ordinary messages. */

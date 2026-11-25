@@ -1,5 +1,6 @@
 package com.kreston8.islandcn;
 
+import android.app.AlarmManager;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -9,6 +10,7 @@ import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.Icon;
@@ -50,6 +52,10 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
     };
 
+    private PhoneWatcher phoneWatcher;
+    private AlarmWatcher alarmWatcher;
+    private boolean alarmRegistered;
+
     private IslandEvent current;
     private String currentKey;
 
@@ -83,6 +89,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             return START_NOT_STICKY;
         }
         attachOverlay();
+        startWatchers();
         return START_STICKY;
     }
 
@@ -126,6 +133,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
                 // The window is already gone with the process.
             }
         }
+        stopWatchers();
         island = null;
         super.onDestroy();
     }
@@ -174,6 +182,57 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
         view.setVisibility(View.INVISIBLE);
         island = view;
+    }
+
+    /**
+     * Starts the two passive watchers: the call state, and the next clock alarm.
+     *
+     * <p>Both are optional. Without {@code READ_PHONE_STATE} the phone half stays dormant, and a
+     * missing alarm clock provider is treated the same way.
+     */
+    private void startWatchers() {
+        if (phoneWatcher == null) {
+            phoneWatcher = new PhoneWatcher(this);
+        }
+        phoneWatcher.start();
+
+        if (alarmWatcher == null) {
+            alarmWatcher = new AlarmWatcher();
+        }
+        if (!alarmRegistered) {
+            try {
+                IntentFilter filter = new IntentFilter(AlarmManager.ACTION_NEXT_ALARM_CLOCK_CHANGED);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    registerReceiver(alarmWatcher, filter, Context.RECEIVER_NOT_EXPORTED);
+                } else {
+                    registerReceiver(alarmWatcher, filter);
+                }
+                alarmRegistered = true;
+            } catch (Throwable ignored) {
+                // Some ROMs reject the registration; the island keeps working without alarm cards.
+            }
+        }
+        try {
+            alarmWatcher.schedule(this);
+        } catch (Throwable ignored) {
+            // Nothing scheduled, or the clock service is unavailable.
+        }
+    }
+
+    private void stopWatchers() {
+        if (phoneWatcher != null) {
+            phoneWatcher.stop();
+            phoneWatcher = null;
+        }
+        if (alarmRegistered && alarmWatcher != null) {
+            try {
+                unregisterReceiver(alarmWatcher);
+            } catch (Throwable ignored) {
+                // Already unregistered with the process.
+            }
+            alarmRegistered = false;
+        }
+        alarmWatcher = null;
     }
 
     private void openCurrent() {

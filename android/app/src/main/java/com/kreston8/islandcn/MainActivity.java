@@ -29,6 +29,7 @@ public final class MainActivity extends Activity {
     private TextView overlayState;
     private TextView accessState;
     private TextView smsState;
+    private TextView phoneState;
     private TextView serviceState;
     private Button startStop;
 
@@ -75,6 +76,14 @@ public final class MainActivity extends Activity {
         addTop(smsCard, button(R.string.grant, v -> requestSms()), 12);
         addFill(root, smsCard, 14);
 
+        LinearLayout phoneCard = card();
+        addFill(phoneCard, text(R.string.perm_phone_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(phoneCard, text(R.string.perm_phone_desc, 13f, COLOR_SECONDARY, false), 6);
+        phoneState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(phoneCard, phoneState, 10);
+        addTop(phoneCard, button(R.string.grant, v -> requestPhone()), 12);
+        addFill(root, phoneCard, 14);
+
         LinearLayout serviceCard = card();
         addFill(serviceCard, text(R.string.state_title, 16f, COLOR_PRIMARY, true), 0);
         serviceState = text(R.string.service_off, 13f, COLOR_IDLE, true);
@@ -115,6 +124,10 @@ public final class MainActivity extends Activity {
         boolean sms = canReceiveSms();
         smsState.setText(sms ? R.string.granted : R.string.missing);
         smsState.setTextColor(sms ? COLOR_OK : COLOR_MISSING);
+
+        boolean phone = canWatchCalls();
+        phoneState.setText(phone ? R.string.granted : R.string.missing);
+        phoneState.setTextColor(phone ? COLOR_OK : COLOR_MISSING);
 
         boolean running = IslandService.isRunning();
         serviceState.setText(running ? R.string.service_on : R.string.service_off);
@@ -157,10 +170,37 @@ public final class MainActivity extends Activity {
         requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS}, 2);
     }
 
+    private boolean canWatchCalls() {
+        return checkSelfPermission(Manifest.permission.READ_PHONE_STATE)
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestPhone() {
+        if (canWatchCalls()) {
+            toast(R.string.granted);
+            return;
+        }
+        requestPermissions(new String[]{
+                Manifest.permission.READ_PHONE_STATE,
+                Manifest.permission.READ_CALL_LOG}, 3);
+    }
+
+    private void restartService() {
+        stopService(new Intent(this, IslandService.class));
+        if (Perms.canOverlay(this)) {
+            startForegroundService(new Intent(this, IslandService.class));
+        }
+        startStop.postDelayed(this::refreshState, 800);
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         refreshState();
+        if (requestCode == 3 && IslandService.isRunning()) {
+            // The call watcher only registers when the service starts, so pick up the new grant.
+            restartService();
+        }
     }
 
     private void toast(int resId) {

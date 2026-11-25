@@ -76,6 +76,7 @@ public final class IslandView extends FrameLayout {
     private boolean swipedAway;
     private String copyValue;
     private long etaMillis;
+    private int kind = IslandEvent.KIND_GENERIC;
     private int expandedHeightDp = H_EXPANDED_DP;
 
     IslandView(Context context) {
@@ -281,6 +282,7 @@ public final class IslandView extends FrameLayout {
         textView.setMaxLines(copyRow.getVisibility() == View.VISIBLE ? 1 : 2);
 
         etaMillis = event.etaMillis;
+        kind = event.kind;
         ticker.removeCallbacks(tick);
         if (etaMillis > System.currentTimeMillis()) {
             countdownView.setVisibility(View.VISIBLE);
@@ -340,15 +342,18 @@ public final class IslandView extends FrameLayout {
             return;
         }
         long left = etaMillis - System.currentTimeMillis();
+        boolean alarm = kind == IslandEvent.KIND_ALARM;
         if (left <= 0L) {
-            countdownView.setText(R.string.eta_arriving);
+            countdownView.setText(alarm ? R.string.alarm_ringing : R.string.eta_arriving);
             ticker.removeCallbacks(tick);
             return;
         }
         long minutes = (left + 59_999L) / 60_000L;
-        countdownView.setText(getContext().getString(R.string.eta_minutes, minutes));
+        countdownView.setText(getContext().getString(
+                alarm ? R.string.alarm_minutes_left : R.string.eta_minutes, minutes));
         ticker.removeCallbacks(tick);
         ticker.postDelayed(tick, TICK_MS);
+
     }
 
     private static int tagOf(int kind) {
@@ -361,6 +366,12 @@ public final class IslandView extends FrameLayout {
                 return R.string.tag_delivery;
             case IslandEvent.KIND_TODO:
                 return R.string.tag_todo;
+            case IslandEvent.KIND_CALL:
+                return R.string.tag_call;
+            case IslandEvent.KIND_ALARM:
+                return R.string.tag_alarm;
+            case IslandEvent.KIND_NAV:
+                return R.string.tag_nav;
             default:
                 return 0;
         }

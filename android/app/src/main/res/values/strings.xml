@@ -40,5 +40,20 @@
     <string name="eta_minutes">还有 %1$d 分钟送达</string>
     <string name="eta_arriving">即将送达</string>
 
+    <string name="tag_call">来电</string>
+    <string name="tag_alarm">闹钟</string>
+    <string name="tag_nav">导航</string>
+    <string name="call_unknown">未知号码</string>
+    <string name="call_incoming">正在来电</string>
+    <string name="call_active">通话中</string>
+    <string name="call_hidden_hint">Android 12 起系统不再把来电号码给第三方应用</string>
+    <string name="alarm_title">闹钟 %1$s</string>
+    <string name="alarm_text_soon">就要响了</string>
+    <string name="alarm_minutes_left">还有 %1$d 分钟响铃</string>
+    <string name="alarm_ringing">时间到了</string>
+
+    <string name="perm_phone_title">4. 电话权限</string>
+    <string name="perm_phone_desc">用来在来电时弹出卡片。Android 12 起系统不再把来电号码交给第三方应用，所以高版本只会显示「未知号码」。不授权也能用，只是没有来电卡片。</string>
+
     <string name="miui_hint">MIUI / HyperOS 提示：除上面几项权限，还需要在「应用管理 → islandcn 灵动岛 → 权限」里打开「后台弹出界面」，否则从后台弹不出胶囊。锁屏时系统会隐藏悬浮窗，这是系统限制。</string>
 </resources>
