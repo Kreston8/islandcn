@@ -421,11 +421,12 @@ final class IslandEvent {
                 if (person == null) {
                     continue;
                 }
-                Uri uri = person.getUri();
-                if (uri == null) {
+                String uri = person.getUri();
+                if (uri == null || uri.length() == 0) {
                     continue;
                 }
-                java.io.InputStream in = context.getContentResolver().openInputStream(uri);
+                java.io.InputStream in = context.getContentResolver()
+                        .openInputStream(Uri.parse(uri));
                 if (in == null) {
                     continue;
                 }
