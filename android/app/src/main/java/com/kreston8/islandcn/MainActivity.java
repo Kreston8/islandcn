@@ -383,7 +383,7 @@ public final class MainActivity extends Activity {
 
     private void updateCity() {
         String city = Prefs.text(this, Prefs.KEY_CITY).trim();
-        cityButton.setText(city.isEmpty() ? R.string.weather_city_set : city);
+        cityButton.setText(city.isEmpty() ? getString(R.string.weather_city_set) : city);
     }
 
     private boolean canReadBluetooth() {
