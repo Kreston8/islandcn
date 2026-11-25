@@ -4,8 +4,8 @@ Upstream islandcn is a Next.js site plus a shadcn registry, not a native app. Th
 native Android app that borrows the look of the island: a black pill sits at the top of the screen,
 springs open when a notification arrives, and collapses on its own.
 
-It replaced an earlier WebView shell. Nothing here loads a web page and the app has no network
-permission.
+It replaced an earlier WebView shell. Nothing here loads a web page. The only socket in the app is the
+optional lyric lookup described below, which is why `INTERNET` is declared at all.
 
 ## What it shows
 
@@ -22,6 +22,10 @@ the title, body and application, four by their own sources:
 | 闹钟 | next clock alarm, 15 min ahead | tag + 07:30 + 还有 N 分钟响铃 |
 | 导航 | ongoing notification from a whitelisted map app | tag + the next turn |
 | 音乐 | a playing media session, shown only while the launcher is in front | 44 dp strip: album art + one lyric line, lit character by character |
+
+Every card expands to the same 44 dp strip: one app icon, one bold line, one body line. Two lines are
+all that height holds, so the copyable code moved into the title row and a live countdown replaces the
+body line instead of adding a third one.
 
 The code rows copy to the clipboard and collapse the island; the notification itself is left in the
 shade so the copy is never destructive.
@@ -42,14 +46,18 @@ shade so the copy is never destructive.
   caller id, hence 未知号码 on newer phones.
 - `AlarmWatcher` (`AlarmWatcher.java`) reads `AlarmManager.getNextAlarmClock()` and schedules one
   inexact wake-up fifteen minutes earlier, which is what posts the 闹钟 card. It re-arms itself
-  whenever the system announces a changed alarm.
+  whenever the system announces a changed alarm, arms a second wake-up a minute past the alarm time
+  that withdraws the card, and reconciles card against reality on every call: if the system no longer
+  reports the alarm that was announced, the card is removed.
 - Navigation cards come from the map apps listed in `IslandListener.NAV_PACKAGES`: their ongoing
   notification is allowed through, tagged 导航, and re-posted only when the line changes.
 - `ContentParser` (`ContentParser.java`) is the classifier: keyword plus regular expression matching
   for codes, pickup numbers and delivery ETAs.
 - `IslandView` draws the pill and the expanded card with plain platform views, cross-fading the
   content while the corner radius interpolates from a pill to a card. `OvershootInterpolator` gives
-  the spring. The card grows by one row when a copyable code or a countdown is present.
+  the spring. Every card is the same 44 dp strip — icon, one bold line, one body line — so a
+  copyable code sits in the title row rather than on a row of its own, and a countdown takes over the
+  body line instead of adding a third one.
 - `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
   process.
 - `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
@@ -107,7 +115,12 @@ recording) is dropped instead of shown out of sync.
   third-party apps. The in-call screen is also a full-screen activity, so it covers the overlay while
   the phone is actually ringing.
 - The 闹钟 card is a heads-up about fifteen minutes early; when the alarm fires, the clock app's
-  full-screen intent covers everything.
+  full-screen intent covers everything. The card is withdrawn a minute after the alarm time, and
+  `AlarmWatcher.schedule` retracts it as soon as `getNextAlarmClock()` stops reporting that exact
+  alarm, so a reminder cannot outlive the alarm it describes. One alarm is announced once: the
+  trigger time is remembered in `Prefs.KEY_ALARM_SHOWN`, so a service restart cannot repeat it.
+  A ROM that keeps reporting an alarm the clock app no longer lists would still produce one card;
+  the 闹钟 switch is the way out of that.
 - 导航 depends on the map app publishing the next turn as an ongoing notification, and it refreshes
   every few seconds while driving — the island only shows the latest line.
 
@@ -152,3 +165,17 @@ APK and attaches it to a GitHub release.
 2. Allow installs from unknown sources for the app you download with (MIUI: 设置 → 应用设置 →
    特殊权限 → 安装未知应用).
 3. Open the app, grant the permissions, press 启动灵动岛, then 预览效果.
+
+## Which download for which phone
+
+One APK. There is nothing to choose: the app is plain Java in `classes.dex` with no native code, so
+there is no `lib/` folder and therefore no per-ABI split, and the only device-specific decision is
+made at runtime (the launcher package is resolved through `CATEGORY_HOME`, the foreground package
+through `UsageEvents`). `minSdk 26` means Android 8.0 and newer; `compileSdk`/`targetSdk 34` means it
+is built and checked against Android 14. That one file installs on 小米 / 红米 / POCO with MIUI 12-14
+or HyperOS, and on other skins, with the caveats listed above.
+
+Splitting it per system would only be packaging theatre: the differences between those phones are
+permissions the user grants and runtime detection, not code that can be compiled out. If a future
+feature genuinely needs different code (an OEM SDK, a native library), that is when a second APK
+becomes honest.

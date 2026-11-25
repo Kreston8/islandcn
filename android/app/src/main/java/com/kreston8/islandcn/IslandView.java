@@ -48,9 +48,9 @@ public final class IslandView extends FrameLayout {
 
     private static final int W_COLLAPSED_DP = 78;
     private static final int H_COLLAPSED_DP = 32;
-    private static final int H_EXPANDED_DP = 92;
+    private static final int H_EXPANDED_DP = 44;
     private static final int W_EXPANDED_MAX_DP = 360;
-    private static final float R_EXPANDED_DP = 26f;
+    private static final float R_EXPANDED_DP = 22f;
     private static final long EXPAND_MS = 420L;
     private static final long COLLAPSE_MS = 280L;
     private static final long TICK_MS = 15000L;
@@ -127,21 +127,21 @@ public final class IslandView extends FrameLayout {
         expandedBox = new LinearLayout(context);
         expandedBox.setOrientation(LinearLayout.HORIZONTAL);
         expandedBox.setGravity(Gravity.CENTER_VERTICAL);
-        expandedBox.setPadding(dp(14), 0, dp(8), 0);
+        expandedBox.setPadding(dp(10), 0, dp(6), 0);
         expandedBox.setVisibility(View.INVISIBLE);
         card.addView(expandedBox, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         appIcon = new ImageView(context);
         appIcon.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        expandedBox.addView(appIcon, new LinearLayout.LayoutParams(dp(40), dp(40)));
+        expandedBox.addView(appIcon, new LinearLayout.LayoutParams(dp(28), dp(28)));
 
         LinearLayout column = new LinearLayout(context);
         column.setOrientation(LinearLayout.VERTICAL);
         LinearLayout.LayoutParams columnParams =
                 new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
-        columnParams.leftMargin = dp(12);
-        columnParams.rightMargin = dp(6);
+        columnParams.leftMargin = dp(10);
+        columnParams.rightMargin = dp(4);
         expandedBox.addView(column, columnParams);
 
         headerRow = new LinearLayout(context);
@@ -164,7 +164,7 @@ public final class IslandView extends FrameLayout {
 
         titleView = new TextView(context);
         titleView.setTextColor(Color.WHITE);
-        titleView.setTextSize(14f);
+        titleView.setTextSize(12.5f);
         titleView.setTypeface(Typeface.DEFAULT_BOLD);
         titleView.setSingleLine(true);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
@@ -173,12 +173,12 @@ public final class IslandView extends FrameLayout {
 
         textView = new TextView(context);
         textView.setTextColor(0xFFB9B9C2);
-        textView.setTextSize(12f);
-        textView.setMaxLines(2);
+        textView.setTextSize(11f);
+        textView.setMaxLines(1);
         textView.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        textParams.topMargin = dp(2);
+        textParams.topMargin = dp(1);
         column.addView(textView, textParams);
 
         copyRow = new LinearLayout(context);
@@ -187,26 +187,27 @@ public final class IslandView extends FrameLayout {
         copyRow.setVisibility(View.GONE);
         LinearLayout.LayoutParams copyParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        copyParams.topMargin = dp(5);
-        column.addView(copyRow, copyParams);
+        copyParams.leftMargin = dp(6);
+        // Sits in the title row: a third line would not fit the 44 dp strip.
+        headerRow.addView(copyRow, copyParams);
 
         codeView = new TextView(context);
         codeView.setTextColor(0xFF7CE38B);
-        codeView.setTextSize(15f);
+        codeView.setTextSize(12f);
         codeView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         codeView.setLetterSpacing(0.14f);
         codeView.setBackground(rounded(0xFF1E2A22, 8f));
-        codeView.setPadding(dp(9), dp(2), dp(9), dp(2));
+        codeView.setPadding(dp(6), dp(1), dp(6), dp(1));
         copyRow.addView(codeView, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         TextView copyHint = new TextView(context);
         copyHint.setText(R.string.copy_hint);
         copyHint.setTextColor(0xFF8A8A94);
-        copyHint.setTextSize(10f);
+        copyHint.setTextSize(9f);
         LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        hintParams.leftMargin = dp(8);
+        hintParams.leftMargin = dp(5);
         copyRow.addView(copyHint, hintParams);
         copyRow.setOnClickListener(v -> {
             if (actions != null && copyValue != null) {
@@ -216,18 +217,18 @@ public final class IslandView extends FrameLayout {
 
         countdownView = new TextView(context);
         countdownView.setTextColor(0xFFF0B860);
-        countdownView.setTextSize(11f);
+        countdownView.setTextSize(10f);
         countdownView.setVisibility(View.GONE);
         LinearLayout.LayoutParams countdownParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        countdownParams.topMargin = dp(3);
+        countdownParams.topMargin = dp(1);
         column.addView(countdownView, countdownParams);
 
         TextView close = new TextView(context);
         close.setText("\u00d7");
         close.setTextColor(0xFF8A8A94);
-        close.setTextSize(18f);
-        close.setPadding(dp(10), dp(10), dp(10), dp(10));
+        close.setTextSize(16f);
+        close.setPadding(dp(8), dp(8), dp(8), dp(8));
         close.setOnClickListener(v -> {
             if (actions != null) {
                 actions.onDismiss();
@@ -306,28 +307,23 @@ public final class IslandView extends FrameLayout {
             codeView.setText(copyValue);
             copyRow.setVisibility(View.VISIBLE);
         }
-        // The code row needs the vertical space, so the body shrinks to one line.
-        textView.setMaxLines(music || copyRow.getVisibility() == View.VISIBLE ? 1 : 2);
+        // One body line only: the strip is as tall as the music card.
+        textView.setMaxLines(1);
 
         etaMillis = event.etaMillis;
         kind = event.kind;
         startCycle(music ? null : event.cycle);
         ticker.removeCallbacks(tick);
-        if (etaMillis > System.currentTimeMillis()) {
-            countdownView.setVisibility(View.VISIBLE);
+        boolean hasEta = etaMillis > System.currentTimeMillis();
+        // A 44 dp strip holds two lines, so the countdown takes the body line when it has one.
+        countdownView.setVisibility(hasEta ? View.VISIBLE : View.GONE);
+        textView.setVisibility(hasEta ? View.GONE : View.VISIBLE);
+        if (hasEta) {
             updateCountdown();
-        } else {
-            countdownView.setVisibility(View.GONE);
         }
 
-        if (kind == IslandEvent.KIND_MUSIC) {
-            // Half the usual height: cover plus one line.
-            expandedHeightDp = H_MUSIC_DP;
-        } else {
-            expandedHeightDp = H_EXPANDED_DP
-                    + (copyRow.getVisibility() == View.VISIBLE ? 26 : 0)
-                    + (countdownView.getVisibility() == View.VISIBLE ? 18 : 0);
-        }
+        // Every card is the same 44 dp strip: icon, one title line, one body line.
+        expandedHeightDp = H_EXPANDED_DP;
         applyFraction(fraction);
         boolean karaoke =
                 startLyric(event.kind == IslandEvent.KIND_MUSIC ? event.lyric : null, event.position);
@@ -486,13 +482,13 @@ public final class IslandView extends FrameLayout {
             expandedRadiusDp = H_MUSIC_DP / 2f;
         } else {
             headerRow.setVisibility(View.VISIBLE);
-            textView.setTextSize(12f);
-            textView.setMaxLines(2);
+            textView.setTextSize(11f);
+            textView.setMaxLines(1);
             textView.setTextColor(0xFFB9B9C2);
-            icon.width = dp(40);
-            icon.height = dp(40);
+            icon.width = dp(28);
+            icon.height = dp(28);
             appIcon.setLayoutParams(icon);
-            expandedBox.setPadding(dp(14), 0, dp(8), 0);
+            expandedBox.setPadding(dp(10), 0, dp(6), 0);
             cardWidthPx = expandedWidthPx;
             expandedRadiusDp = R_EXPANDED_DP;
         }

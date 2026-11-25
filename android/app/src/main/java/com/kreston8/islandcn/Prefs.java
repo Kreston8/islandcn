@@ -25,6 +25,7 @@ final class Prefs {
     static final String KEY_MUSIC = "on_music";
     /** Not a card kind: the karaoke line itself, which is the only feature that opens a socket. */
     static final String KEY_LYRICS = "on_lyrics";
+    static final String KEY_ALARM_SHOWN = "alarm_shown";
 
     private Prefs() {
     }
@@ -70,6 +71,28 @@ final class Prefs {
                 return get(context, KEY_MUSIC);
             default:
                 return get(context, KEY_GENERIC);
+        }
+    }
+
+    /**
+     * The alarm time the island last announced.
+     *
+     * <p>Kept so one alarm produces one card even when the service restarts, and so the card can be
+     * withdrawn the moment the system stops reporting that alarm.
+     */
+    static long alarmShown(Context context) {
+        try {
+            return store(context).getLong(KEY_ALARM_SHOWN, 0L);
+        } catch (Throwable ignored) {
+            return 0L;
+        }
+    }
+
+    static void setAlarmShown(Context context, long trigger) {
+        try {
+            store(context).edit().putLong(KEY_ALARM_SHOWN, trigger).apply();
+        } catch (Throwable ignored) {
+            // A read-only profile keeps the previous value; the card is still withdrawn by hand.
         }
     }
 
