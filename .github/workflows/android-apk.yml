@@ -98,12 +98,13 @@ jobs:
         run: |
           TAG="${{ inputs.tag }}"
           if [ -z "$TAG" ]; then TAG="island-v2.4.${{ github.run_number }}"; fi
+          cat > notes.md <<'NOTES'
+          Native overlay island for Android: a SYSTEM_ALERT_WINDOW pill above other apps driven by a NotificationListenerService. SMS verification and pickup codes with one tap copy, delivery countdown, Mi Notes todo cards, incoming calls, a fifteen minute alarm heads up, navigation lines from whitelisted map apps, and a music strip. Every feature has its own switch in the app.
+
+          This build: the music card is half the height of a normal card (44 dp) and shows only album art plus one line, which lights up character by character as the song is sung. It only appears on the desktop and disappears the moment any app opens, the player included. It also pins the release certificate, so later builds install straight over this one; as the first build with the new key it still needs one uninstall of 2.3.x.
+
+          Honest note about the network: the lyric line is the only feature that opens a socket. It calls the public lyrics endpoint on music.163.com over HTTPS, once per track, only while the lyrics switch is on, capped at 512 KB and kept in memory only. That endpoint has one timestamp per line, so the per character highlight is interpolated inside the line and will not match every syllable. Turning the switch off removes the network use completely.
+          NOTES
           echo "Publishing $TAG"
-          gh release create "$TAG" dist/*.apk \
-            --title "islandcn 灵动岛 $TAG" \
-            --notes "Native overlay island for Android: SYSTEM_ALERT_WINDOW pill above other apps, NotificationListenerService feed, SMS verification/pickup code cards with copy, delivery countdown, Mi Notes todo cards, incoming-call cards, a fifteen-minute alarm heads-up, navigation lines from whitelisted map apps, and a compact music card. The music card is half the height of a normal card (44dp): album art on the left, one lyric line on the right, and the characters light up as they are sung. Every feature has its own switch in the app.
-
-New in this build: the compact karaoke music card, and a pinned release certificate, so future builds install over this one instead of asking for an uninstall. This particular APK is the first one signed with the new key, so it still needs a single uninstall of 2.3.x.
-
-One honest difference from earlier builds: the lyric line is the only feature that uses the network. It asks the public lyrics endpoint on music.163.com over HTTPS, once per track, only while the 联网歌词 switch is on, capped at 512 KB and kept in memory only. The endpoint gives one timestamp per line, so the per-character highlight is interpolated inside the line and will not match every syllable. The 联网歌词 switch turns the socket off completely." \
+          gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \
             || gh release upload "$TAG" dist/*.apk --clobber
