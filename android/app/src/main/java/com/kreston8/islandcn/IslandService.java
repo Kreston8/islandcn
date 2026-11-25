@@ -38,14 +38,16 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private static volatile boolean running;
 
     private final Handler handler = new Handler(Looper.getMainLooper());
+
+    private WindowManager windowManager;
+    private IslandView island;
+
     private final Runnable collapseTask = () -> {
         if (island != null) {
             island.setExpanded(false, true);
         }
     };
 
-    private WindowManager windowManager;
-    private IslandView island;
     private IslandEvent current;
     private String currentKey;
 

@@ -234,7 +234,7 @@ public final class IslandView extends FrameLayout {
         return from + (to - from) * t;
     }
 
-    private int dp(int value) {
+    private int dp(float value) {
         return Math.round(value * density);
     }
 }
