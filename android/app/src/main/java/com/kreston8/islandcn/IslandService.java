@@ -5,6 +5,8 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
@@ -143,6 +145,11 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             public void onDismiss() {
                 dismissCurrent();
             }
+
+            @Override
+            public void onCopy(String value) {
+                copyCode(value);
+            }
         });
 
         WindowManager.LayoutParams params = new WindowManager.LayoutParams();
@@ -183,12 +190,44 @@ public final class IslandService extends Service implements IslandBridge.Sink {
                 // The notification went stale; fall back to the app itself.
             }
         }
+        // No content intent (SMS, or a notification without a tap target): open the app itself.
+        if (event != null && event.pkg != null) {
+            Intent launch = getPackageManager().getLaunchIntentForPackage(event.pkg);
+            if (launch != null) {
+                launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                try {
+                    startActivity(launch);
+                    return;
+                } catch (Throwable ignored) {
+                    // Fall through to our own screen.
+                }
+            }
+        }
         Intent open = new Intent(this, MainActivity.class);
         open.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
         try {
             startActivity(open);
         } catch (Throwable ignored) {
             // Nothing sensible left to do.
+        }
+    }
+
+    private void copyCode(String value) {
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        try {
+            ClipboardManager manager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+            if (manager != null) {
+                manager.setPrimaryClip(ClipData.newPlainText(getString(R.string.tag_otp), value));
+            }
+            Toast.makeText(this, R.string.copied, Toast.LENGTH_SHORT).show();
+        } catch (Throwable ignored) {
+            // The clipboard can be unavailable in restricted profiles.
+        }
+        handler.removeCallbacks(collapseTask);
+        if (island != null) {
+            island.setExpanded(false, true);
         }
     }
 
@@ -203,6 +242,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         current = null;
         currentKey = null;
         if (island != null) {
+            island.stopTicker();
             island.setVisibility(View.INVISIBLE);
         }
     }

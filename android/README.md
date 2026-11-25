@@ -7,6 +7,21 @@ springs open when a notification arrives, and collapses on its own.
 It replaced an earlier WebView shell. Nothing here loads a web page and the app has no network
 permission.
 
+## What it shows
+
+Every notification gets a card. Four kinds of notification get a richer card, decided by
+`ContentParser` from the title, body and application:
+
+| Kind | Trigger | Card |
+|---|---|---|
+| 验证码 | SMS with a code keyword, or a notification containing one | big code + 点击复制 |
+| 取件码 | "取件码/取货码/提货码" plus a code nearby | big code + 点击复制 |
+| 外卖 | "预计 12:35 送达", "还有 18 分钟" | countdown that refreshes every 15 s |
+| 待办 | notification from 小米笔记 / a notes app | tag + the todo text |
+
+The code rows copy to the clipboard and collapse the island; the notification itself is left in the
+shade so the copy is never destructive.
+
 ## How it works
 
 - `IslandService` (`IslandService.java`) is a foreground service that owns one
@@ -15,13 +30,18 @@ permission.
 - `IslandListener` (`IslandListener.java`) is a `NotificationListenerService`. It drops group
   summaries, ongoing events and its own status notification, then hands title, body, icon and
   content intent to the island.
+- `SmsReceiver` (`SmsReceiver.java`) listens for `SMS_RECEIVED` so a code arrives even when the
+  messaging app does not post a notification. Ordinary texts are dropped; when this receiver is
+  active the messaging app's own notification is skipped to avoid showing the code twice.
+- `ContentParser` (`ContentParser.java`) is the classifier: keyword plus regular expression matching
+  for codes, pickup numbers and delivery ETAs.
 - `IslandView` draws the pill and the expanded card with plain platform views, cross-fading the
   content while the corner radius interpolates from a pill to a card. `OvershootInterpolator` gives
-  the spring.
-- `IslandBridge` is a static, weakly referenced bus between the two components, which run in the
-  same process.
+  the spring. The card grows by one row when a copyable code or a countdown is present.
+- `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
+  process.
 - `MainActivity` is the setup screen: permission states, start/stop, and a preview that posts a fake
-  event.
+  verification code.
 
 Behaviour: tap the pill to expand, tap the card to open the notification's app, swipe up or tap the
 cross to dismiss (which cancels the notification), auto collapse after 4.2 s, and removing the
@@ -31,9 +51,10 @@ notification from the shade hides the island.
 
 1. **Display over other apps** (`SYSTEM_ALERT_WINDOW`) for the overlay itself.
 2. **Notification access** (`BIND_NOTIFICATION_LISTENER_SERVICE`) for the content.
-3. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
+3. **SMS** (`RECEIVE_SMS`), optional, for codes that never reach the shade.
+4. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
    started from the background.
-4. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
+5. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
    notification.
 
 ## What it is not
@@ -42,8 +63,9 @@ notification from the shade hides the island.
   layer), so the island is anchored just below it instead of around the punch hole.
 - No interaction with the lock screen: the system hides `TYPE_APPLICATION_OVERLAY` windows while the
   device is locked.
-- No media/charging/battery states, no gesture to hide a running timer. It reacts to new
-  notifications only, which is the part that reads as "dynamic island" in daily use.
+- The 待办 card only sees Mi Notes' *reminder notifications*. Reading the note database itself needs
+  root, and there is no public provider for it, so the island cannot list upcoming todos.
+- No call, alarm or navigation cards yet: those are the next batch.
 
 ## Build
 
@@ -63,4 +85,4 @@ APK and attaches it to a GitHub release.
 1. Download the `.apk` from the release assets.
 2. Allow installs from unknown sources for the app you download with (MIUI: 设置 → 应用设置 →
    特殊权限 → 安装未知应用).
-3. Open the app, grant the two permissions, press 启动灵动岛, then 预览效果.
+3. Open the app, grant the permissions, press 启动灵动岛, then 预览效果.

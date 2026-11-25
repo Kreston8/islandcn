@@ -28,6 +28,7 @@ public final class MainActivity extends Activity {
 
     private TextView overlayState;
     private TextView accessState;
+    private TextView smsState;
     private TextView serviceState;
     private Button startStop;
 
@@ -66,6 +67,14 @@ public final class MainActivity extends Activity {
         addTop(accessCard, button(R.string.grant, v -> Perms.openNotificationAccessSettings(this)), 12);
         addFill(root, accessCard, 14);
 
+        LinearLayout smsCard = card();
+        addFill(smsCard, text(R.string.perm_sms_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(smsCard, text(R.string.perm_sms_desc, 13f, COLOR_SECONDARY, false), 6);
+        smsState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(smsCard, smsState, 10);
+        addTop(smsCard, button(R.string.grant, v -> requestSms()), 12);
+        addFill(root, smsCard, 14);
+
         LinearLayout serviceCard = card();
         addFill(serviceCard, text(R.string.state_title, 16f, COLOR_PRIMARY, true), 0);
         serviceState = text(R.string.service_off, 13f, COLOR_IDLE, true);
@@ -103,6 +112,10 @@ public final class MainActivity extends Activity {
         accessState.setText(access ? R.string.granted : R.string.missing);
         accessState.setTextColor(access ? COLOR_OK : COLOR_MISSING);
 
+        boolean sms = canReceiveSms();
+        smsState.setText(sms ? R.string.granted : R.string.missing);
+        smsState.setTextColor(sms ? COLOR_OK : COLOR_MISSING);
+
         boolean running = IslandService.isRunning();
         serviceState.setText(running ? R.string.service_on : R.string.service_off);
         serviceState.setTextColor(running ? COLOR_OK : COLOR_IDLE);
@@ -130,6 +143,24 @@ public final class MainActivity extends Activity {
             return;
         }
         IslandBridge.post(IslandEvent.preview(this));
+    }
+
+    private boolean canReceiveSms() {
+        return checkSelfPermission(Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestSms() {
+        if (canReceiveSms()) {
+            toast(R.string.granted);
+            return;
+        }
+        requestPermissions(new String[]{Manifest.permission.RECEIVE_SMS}, 2);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        refreshState();
     }
 
     private void toast(int resId) {
