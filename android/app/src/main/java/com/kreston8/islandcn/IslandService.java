@@ -67,20 +67,28 @@ public final class IslandService extends Service implements IslandBridge.Sink {
      * Takes an alarm card off the pill on its own.
      *
      * <p>A reminder is a five second look at the clock, not a card that stays: once it is over the
-     * pill goes back to the standby line, or to the lyric line when a track is playing.
+     * pill goes back to the standby line, or to the lyric line when a track is playing. It is a
+     * method reference rather than a lambda because the fields it touches are declared further down
+     * the file, and a lambda here would be an illegal forward reference.
      */
-    private final Runnable alarmTask = () -> {
+    private final Runnable alarmTask = this::clearAlarmCard;
+
+    /** Brings the pill back when the three hidden minutes are over. */
+    private final Runnable hideTask = this::unhide;
+
+    /** Body of {@link #alarmTask}. */
+    private void clearAlarmCard() {
         if (current != null && current.kind == IslandEvent.KIND_ALARM) {
             notifyCard = null;
             hideIsland();
         }
-    };
+    }
 
-    /** Brings the pill back when the three hidden minutes are over. */
-    private final Runnable hideTask = () -> {
+    /** Body of {@link #hideTask}. */
+    private void unhide() {
         hideUntil = 0L;
         applyPhase();
-    };
+    }
 
     private PhoneWatcher phoneWatcher;
     private AlarmWatcher alarmWatcher;
