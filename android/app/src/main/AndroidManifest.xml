@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Draw the island above every app. -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -14,6 +15,11 @@
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <!-- Read the next clock alarm so the card can appear a few minutes before it rings. -->
     <uses-permission android:name="com.android.alarm.permission.SET_ALARM" />
+    <!-- Ask which app is in front, so the music card hides when the player is on screen again.
+         This is the "usage access" special permission; it is granted in system settings. -->
+    <uses-permission
+        android:name="android.permission.PACKAGE_USAGE_STATS"
+        tools:ignore="ProtectedPermissions" />
 
     <application
         android:allowBackup="false"

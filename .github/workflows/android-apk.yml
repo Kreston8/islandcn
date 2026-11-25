@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.2.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.3.<run number>)"
         required: false
         default: ""
   push:
@@ -50,13 +50,13 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-            -PversionName="2.2.${{ github.run_number }}"
+            -PversionName="2.3.${{ github.run_number }}"
 
       - name: Collect APK
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-             "dist/islandcn-island-2.2.${{ github.run_number }}.apk"
+             "dist/islandcn-island-2.3.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -70,9 +70,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.2.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.3.${{ github.run_number }}"; fi
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk \
             --title "islandcn 灵动岛 $TAG" \
-            --notes "Native overlay island for Android: SYSTEM_ALERT_WINDOW pill above other apps, NotificationListenerService feed, SMS verification/pickup code cards with copy, delivery countdown, Mi Notes todo cards, incoming-call cards, a fifteen-minute alarm heads-up and navigation lines from whitelisted map apps. No WebView and no network access. Sideload build, debug-key signed." \
+            --notes "Native overlay island for Android: SYSTEM_ALERT_WINDOW pill above other apps, NotificationListenerService feed, SMS verification/pickup code cards with copy, delivery countdown, Mi Notes todo cards, incoming-call cards, a fifteen-minute alarm heads-up, navigation lines from whitelisted map apps, and a music card that shows what the player publishes and hides itself when you open the player again. Every kind has its own on/off switch in the app. No WebView and no network access. Sideload build, debug-key signed: uninstall the previous version before installing this one." \
             || gh release upload "$TAG" dist/*.apk --clobber

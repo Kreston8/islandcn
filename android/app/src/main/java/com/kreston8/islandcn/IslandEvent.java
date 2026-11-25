@@ -26,6 +26,7 @@ final class IslandEvent {
     static final int KIND_CALL = 5;
     static final int KIND_ALARM = 6;
     static final int KIND_NAV = 7;
+    static final int KIND_MUSIC = 8;
 
     private static final int ICON_PX = 96;
 
@@ -42,6 +43,13 @@ final class IslandEvent {
     final String copyText;
     /** When the delivery is expected, or 0 when the card has no countdown. */
     final long etaMillis;
+    /** Extra lines the card cycles through, e.g. title then artist. Null means "use text". */
+    CharSequence cycle[];
+
+    IslandEvent cycle(CharSequence... lines) {
+        this.cycle = lines;
+        return this;
+    }
 
     private IslandEvent(
             String key,
@@ -202,6 +210,49 @@ final class IslandEvent {
                 trigger);
     }
 
+    /**
+     * The track playing while its player is in the background.
+     *
+     * <p>The card rotates through the lines the player publishes; no lyrics source is added, so
+     * this stays the title and the artist. Album art is downscaled to {@link #ICON_PX} because a
+     * full-size cover (often 1024x1024, 4 MB) would otherwise stay in memory the whole time.
+     */
+    static IslandEvent music(
+            Context context,
+            String pkg,
+            CharSequence title,
+            CharSequence artist,
+            Bitmap art,
+            PendingIntent open) {
+        if (pkg == null) {
+            return null;
+        }
+        CharSequence name = isEmpty(title) ? context.getString(R.string.music_unknown) : title;
+        CharSequence singer = isEmpty(artist) ? null : artist;
+        Bitmap icon = scaleIcon(art);
+        if (icon == null) {
+            try {
+                icon = toBitmap(context.getPackageManager().getApplicationIcon(pkg), ICON_PX);
+            } catch (Throwable ignored) {
+                // A missing icon is cosmetic only; the label still identifies the player.
+                icon = null;
+            }
+        }
+        IslandEvent event = new IslandEvent(
+                "music:" + pkg,
+                pkg,
+                labelOf(context, pkg),
+                icon,
+                name,
+                singer == null ? context.getString(R.string.tag_music) : singer,
+                open,
+                System.currentTimeMillis(),
+                KIND_MUSIC,
+                null,
+                0L);
+        return singer == null ? event.cycle(name) : event.cycle(name, singer);
+    }
+
     private static Bitmap bundledIcon(Context context, int resId) {
         try {
             return toBitmap(context.getDrawable(resId), ICON_PX);
@@ -303,6 +354,21 @@ final class IslandEvent {
         drawable.setBounds(0, 0, size, size);
         drawable.draw(canvas);
         return bitmap;
+    }
+
+    /** Shrinks album art to icon size; the full-resolution cover is never kept. */
+    private static Bitmap scaleIcon(Bitmap source) {
+        if (source == null || source.isRecycled()) {
+            return null;
+        }
+        try {
+            if (source.getWidth() <= ICON_PX && source.getHeight() <= ICON_PX) {
+                return source;
+            }
+            return Bitmap.createScaledBitmap(source, ICON_PX, ICON_PX, true);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static boolean isEmpty(CharSequence value) {

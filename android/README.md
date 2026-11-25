@@ -9,8 +9,8 @@ permission.
 
 ## What it shows
 
-Every notification gets a card. Seven kinds get a richer card — four decided by `ContentParser` from
-the title, body and application, three by their own sources:
+Every notification gets a card. Eight kinds get a richer card — four decided by `ContentParser` from
+the title, body and application, four by their own sources:
 
 | Kind | Trigger | Card |
 |---|---|---|
@@ -21,6 +21,7 @@ the title, body and application, three by their own sources:
 | 来电 | call state callback | tag + 号码 / 未知号码，tap 打开拨号盘 |
 | 闹钟 | next clock alarm, 15 min ahead | tag + 07:30 + 还有 N 分钟响铃 |
 | 导航 | ongoing notification from a whitelisted map app | tag + the next turn |
+| 音乐 | a playing media session whose app is in the background | tag + 歌名 / 歌手, rotating every 2.6 s |
 
 The code rows copy to the clipboard and collapse the island; the notification itself is left in the
 shade so the copy is never destructive.
@@ -51,12 +52,23 @@ shade so the copy is never destructive.
   the spring. The card grows by one row when a copyable code or a countdown is present.
 - `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
   process.
-- `MainActivity` is the setup screen: permission states, start/stop, and a preview that posts a fake
-  verification code.
+- `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
+  rides on the notification access the app already has. Track changes arrive as
+  `MediaController.Callback`, so nothing polls for metadata. The only timer is a 2.5 s
+  `UsageStatsManager` query answering "is the player on screen again", and it runs only while a
+  session is playing: pause, screen off or a missing usage-access grant cancels it. One card per
+  track.
+- `Prefs` (`Prefs.java`) is the nine-way switch store. `IslandService.onIslandEvent` drops a card
+  whose switch is off before the overlay is touched at all.
+- `MainActivity` is the setup screen: permission states, start/stop, a preview that posts a fake
+  verification code, and one on/off switch per kind.
 
 Behaviour: tap the pill to expand, tap the card to open the notification's app, swipe up or tap the
 cross to dismiss (which cancels the notification), auto collapse after 4.2 s, and removing the
 notification from the shade hides the island.
+
+The music card is the exception to the 4.2 s collapse: it stays open so its lines can rotate, and it
+disappears by itself the moment you open the player or pause the track.
 
 ## Permissions the user has to grant
 
@@ -65,9 +77,11 @@ notification from the shade hides the island.
 3. **SMS** (`RECEIVE_SMS`), optional, for codes that never reach the shade.
 4. **Phone** (`READ_PHONE_STATE`), optional, for incoming-call cards. On Android 12+ the card still
    says 未知号码, because the caller id is no longer shared with third-party apps.
-5. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
+5. **Usage access** (`PACKAGE_USAGE_STATS`), optional, so the music card knows when the player is in
+   front again. One cheap query every 2.5 s, and only while a track is actually playing.
+6. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
    started from the background.
-6. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
+7. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
    notification.
 
 ## What it is not
@@ -86,6 +100,15 @@ notification from the shade hides the island.
 - 导航 depends on the map app publishing the next turn as an ongoing notification, and it refreshes
   every few seconds while driving — the island only shows the latest line.
 
+
+- 音乐 shows what the player publishes — title, artist, album art. Real per-line lyrics are not
+  obtainable offline: 网易云音乐 (like most players) keeps the lyrics inside its own UI and puts
+  nothing in the media session or the metadata, and reading that UI is pointless here because the
+  card is hidden exactly while that UI is on screen. Scrolling lyrics would need either a network
+  lyrics source (this app deliberately has no network permission) or accessibility scraping; both
+  are opt-in features, never the default.
+- The music card needs the **usage access** grant to hide itself when you return to the player.
+  Without it the card still appears, but only goes away on pause or on the next track.
 ## Build
 
 Locally, with JDK 17 and the Android SDK (`compileSdk 34`):

@@ -55,6 +55,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private PhoneWatcher phoneWatcher;
     private AlarmWatcher alarmWatcher;
     private boolean alarmRegistered;
+    private MediaWatcher mediaWatcher;
 
     private IslandEvent current;
     private String currentKey;
@@ -98,6 +99,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         if (event == null) {
             return;
         }
+        if (!Prefs.enabled(this, event.kind)) {
+            return;
+        }
         if (island == null) {
             attachOverlay();
         }
@@ -110,7 +114,10 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         island.setVisibility(View.VISIBLE);
         island.setExpanded(true, true);
         handler.removeCallbacks(collapseTask);
-        handler.postDelayed(collapseTask, AUTO_COLLAPSE_MS);
+        if (event.kind != IslandEvent.KIND_MUSIC) {
+            // The music card stays open, otherwise its lines would be clipped while rotating.
+            handler.postDelayed(collapseTask, AUTO_COLLAPSE_MS);
+        }
     }
 
     @Override
@@ -185,10 +192,11 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     }
 
     /**
-     * Starts the two passive watchers: the call state, and the next clock alarm.
+     * Starts the passive watchers: the call state, the next clock alarm, and the playing track.
      *
-     * <p>Both are optional. Without {@code READ_PHONE_STATE} the phone half stays dormant, and a
-     * missing alarm clock provider is treated the same way.
+     * <p>All three are optional. Without {@code READ_PHONE_STATE} the phone half stays dormant, a
+     * missing alarm clock provider is treated the same way, and the music half simply never sees a
+     * session.
      */
     private void startWatchers() {
         if (phoneWatcher == null) {
@@ -217,6 +225,19 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         } catch (Throwable ignored) {
             // Nothing scheduled, or the clock service is unavailable.
         }
+
+        // The music watcher is the only part that polls, so it is skipped entirely when off.
+        if (!Prefs.enabled(this, IslandEvent.KIND_MUSIC)) {
+            return;
+        }
+        if (mediaWatcher == null) {
+            mediaWatcher = new MediaWatcher(this);
+        }
+        try {
+            mediaWatcher.start();
+        } catch (Throwable ignored) {
+            // Without notification access there are no media sessions to read.
+        }
     }
 
     private void stopWatchers() {
@@ -233,6 +254,11 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             alarmRegistered = false;
         }
         alarmWatcher = null;
+
+        if (mediaWatcher != null) {
+            mediaWatcher.stop();
+            mediaWatcher = null;
+        }
     }
 
     private void openCurrent() {

@@ -9,6 +9,8 @@ import android.graphics.drawable.GradientDrawable;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
+import android.view.Gravity;
+import android.widget.Switch;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -30,6 +32,7 @@ public final class MainActivity extends Activity {
     private TextView accessState;
     private TextView smsState;
     private TextView phoneState;
+    private TextView usageState;
     private TextView serviceState;
     private Button startStop;
 
@@ -84,6 +87,14 @@ public final class MainActivity extends Activity {
         addTop(phoneCard, button(R.string.grant, v -> requestPhone()), 12);
         addFill(root, phoneCard, 14);
 
+        LinearLayout usageCard = card();
+        addFill(usageCard, text(R.string.perm_usage_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(usageCard, text(R.string.perm_usage_desc, 13f, COLOR_SECONDARY, false), 6);
+        usageState = text(R.string.missing, 13f, COLOR_MISSING, true);
+        addFill(usageCard, usageState, 10);
+        addTop(usageCard, button(R.string.grant, v -> Perms.openUsageAccessSettings(this)), 12);
+        addFill(root, usageCard, 14);
+
         LinearLayout serviceCard = card();
         addFill(serviceCard, text(R.string.state_title, 16f, COLOR_PRIMARY, true), 0);
         serviceState = text(R.string.service_off, 13f, COLOR_IDLE, true);
@@ -92,6 +103,21 @@ public final class MainActivity extends Activity {
         addTop(serviceCard, startStop, 12);
         addTop(serviceCard, button(R.string.preview, v -> preview()), 8);
         addFill(root, serviceCard, 14);
+
+        LinearLayout featuresCard = card();
+        addFill(featuresCard, text(R.string.settings_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(featuresCard, text(R.string.settings_desc, 13f, COLOR_SECONDARY, false), 6);
+        switchRow(featuresCard, R.string.label_generic, Prefs.KEY_GENERIC);
+        switchRow(featuresCard, R.string.label_otp, Prefs.KEY_OTP);
+        switchRow(featuresCard, R.string.label_pickup, Prefs.KEY_PICKUP);
+        switchRow(featuresCard, R.string.label_delivery, Prefs.KEY_DELIVERY);
+        switchRow(featuresCard, R.string.label_todo, Prefs.KEY_TODO);
+        switchRow(featuresCard, R.string.label_call, Prefs.KEY_CALL);
+        switchRow(featuresCard, R.string.label_alarm, Prefs.KEY_ALARM);
+        switchRow(featuresCard, R.string.label_nav, Prefs.KEY_NAV);
+        switchRow(featuresCard, R.string.label_music, Prefs.KEY_MUSIC);
+        addFill(featuresCard, text(R.string.music_hint, 12f, 0xFF8A8A94, false), 12);
+        addFill(root, featuresCard, 14);
 
         TextView miui = text(R.string.miui_hint, 12f, 0xFF8A8A94, false);
         miui.setLineSpacing(dp(3), 1f);
@@ -128,6 +154,10 @@ public final class MainActivity extends Activity {
         boolean phone = canWatchCalls();
         phoneState.setText(phone ? R.string.granted : R.string.missing);
         phoneState.setTextColor(phone ? COLOR_OK : COLOR_MISSING);
+
+        boolean usage = Perms.hasUsageAccess(this);
+        usageState.setText(usage ? R.string.granted : R.string.missing);
+        usageState.setTextColor(usage ? COLOR_OK : COLOR_MISSING);
 
         boolean running = IslandService.isRunning();
         serviceState.setText(running ? R.string.service_on : R.string.service_off);
@@ -187,10 +217,18 @@ public final class MainActivity extends Activity {
 
     private void restartService() {
         stopService(new Intent(this, IslandService.class));
-        if (Perms.canOverlay(this)) {
-            startForegroundService(new Intent(this, IslandService.class));
+        if (!Perms.canOverlay(this)) {
+            return;
         }
-        startStop.postDelayed(this::refreshState, 800);
+        // The stop is asynchronous; starting right away can land on the dying instance.
+        startStop.postDelayed(() -> {
+            try {
+                startForegroundService(new Intent(this, IslandService.class));
+            } catch (Throwable ignored) {
+                // The screen went away while waiting; the next launch starts it again.
+            }
+        }, 400);
+        startStop.postDelayed(this::refreshState, 1200);
     }
 
     @Override
@@ -201,6 +239,27 @@ public final class MainActivity extends Activity {
             // The call watcher only registers when the service starts, so pick up the new grant.
             restartService();
         }
+    }
+
+    /** One settings row: label on the left, toggle on the right. */
+    private void switchRow(LinearLayout parent, int labelRes, String key) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text(labelRes, 14f, COLOR_PRIMARY, false), new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Switch toggle = new Switch(this);
+        toggle.setChecked(Prefs.get(this, key));
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            Prefs.set(this, key, checked);
+            if (IslandService.isRunning()) {
+                // The music watcher only registers while its switch is on, so re-read the setting.
+                restartService();
+            }
+        });
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        addFill(parent, row, 10);
     }
 
     private void toast(int resId) {

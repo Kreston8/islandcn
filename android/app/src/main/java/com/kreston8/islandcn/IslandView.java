@@ -49,6 +49,7 @@ public final class IslandView extends FrameLayout {
     private static final long EXPAND_MS = 420L;
     private static final long COLLAPSE_MS = 280L;
     private static final long TICK_MS = 15000L;
+    private static final long CYCLE_MS = 2600L;
 
     private final float density;
     private final int expandedWidthPx;
@@ -67,6 +68,7 @@ public final class IslandView extends FrameLayout {
 
     private final Handler ticker = new Handler(Looper.getMainLooper());
     private final Runnable tick = this::updateCountdown;
+    private final Runnable advance = this::advanceCycle;
 
     private ValueAnimator animator;
     private float fraction;
@@ -78,6 +80,8 @@ public final class IslandView extends FrameLayout {
     private long etaMillis;
     private int kind = IslandEvent.KIND_GENERIC;
     private int expandedHeightDp = H_EXPANDED_DP;
+    private CharSequence[] cycle;
+    private int cycleIndex;
 
     IslandView(Context context) {
         super(context);
@@ -283,6 +287,7 @@ public final class IslandView extends FrameLayout {
 
         etaMillis = event.etaMillis;
         kind = event.kind;
+        startCycle(event.cycle);
         ticker.removeCallbacks(tick);
         if (etaMillis > System.currentTimeMillis()) {
             countdownView.setVisibility(View.VISIBLE);
@@ -305,6 +310,7 @@ public final class IslandView extends FrameLayout {
 
     void stopTicker() {
         ticker.removeCallbacks(tick);
+        ticker.removeCallbacks(advance);
     }
 
     @Override
@@ -319,6 +325,11 @@ public final class IslandView extends FrameLayout {
             animator = null;
         }
         expanded = value;
+        if (value) {
+            scheduleAdvance();
+        } else {
+            ticker.removeCallbacks(advance);
+        }
         float target = value ? 1f : 0f;
         if (!animate) {
             fraction = target;
@@ -356,6 +367,39 @@ public final class IslandView extends FrameLayout {
 
     }
 
+    /** Starts rotating the extra lines (song, then artist) while the card is open. */
+    private void startCycle(CharSequence[] lines) {
+        ticker.removeCallbacks(advance);
+        cycle = lines != null && lines.length > 1 ? lines : null;
+        cycleIndex = 0;
+        if (cycle == null) {
+            return;
+        }
+        // The heading already shows the first line, so start on the one after it.
+        if (cycle[0] != null && TextUtils.equals(cycle[0], titleView.getText())) {
+            cycleIndex = 1;
+            textView.setText(cycle[1]);
+        }
+        scheduleAdvance();
+    }
+
+    private void scheduleAdvance() {
+        ticker.removeCallbacks(advance);
+        if (cycle != null && expanded) {
+            ticker.postDelayed(advance, CYCLE_MS);
+        }
+    }
+
+    private void advanceCycle() {
+        if (cycle == null || !expanded) {
+            return;
+        }
+        cycleIndex = (cycleIndex + 1) % cycle.length;
+        textView.setText(cycle[cycleIndex]);
+        textView.setVisibility(View.VISIBLE);
+        scheduleAdvance();
+    }
+
     private static int tagOf(int kind) {
         switch (kind) {
             case IslandEvent.KIND_OTP:
@@ -372,6 +416,8 @@ public final class IslandView extends FrameLayout {
                 return R.string.tag_alarm;
             case IslandEvent.KIND_NAV:
                 return R.string.tag_nav;
+            case IslandEvent.KIND_MUSIC:
+                return R.string.tag_music;
             default:
                 return 0;
         }
