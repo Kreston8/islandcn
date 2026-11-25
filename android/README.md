@@ -83,6 +83,10 @@ the items you enabled:
   days-since-epoch × 7 mod 30, so it lands on a different line every day instead of walking the list.
 - **蓝牙电量** — the same accessory percentages as the chips, read through the passive path only: the
   standby pill never opens a GATT connection, so its 4-second refresh cannot disturb a headset.
+- **Long press to copy** — not just readable: a long press on the pill copies the lines it is drawing,
+  in that order, joined with ` · `, so a pill showing only 每日一句 copies that sentence and nothing
+  else. The pickup-code card works the same way for 驿站名：取件码, while the copy button inside the
+  card gives the bare code.
 
 The five items sit one per row — switch, name, 上移, 下移 — under the master switch, so hiding an item
 never needs a reorder. While a notification card exists as well the two swap every 3 seconds, and
@@ -90,6 +94,15 @@ closing that notification by hand leaves the standby pill alone on screen. A lyr
 it keeps the pill, gives a fresh notification exactly 3 seconds, then comes back at the position the
 track has reached meanwhile. The pill still disappears the moment the launcher is no longer in front
 or the screen is locked.
+
+### Appearance (外观)
+
+The settings screen opens with an 外观 card: eight dark tints and a 0–100% opacity slider, applied to
+both windows at once — the card that pops up and the standby pill — so the two can never disagree.
+The hair-line border fades with the fill, because a see-through pill with a solid outline looks like
+a wire frame. The presets are dark on purpose: every line on the island is white, so a pale fill
+would make it unreadable, and opacity is the knob for "make it quieter" instead. Dragging the slider
+is a live preview.
 
 ## How it works
 
@@ -155,10 +168,15 @@ or the screen is locked.
 - `Prefs` (`Prefs.java`) is the switch store: one boolean per first-level feature (`on_wechat`,
   `on_qq`, `on_pickup`, `on_delivery` plus `dl_meituan` / `dl_shangou` / `dl_jd` / `dl_qixian`,
   `on_todo`, `on_call`, `on_alarm`, `on_music` with `on_lyrics`, `on_bt` with one `bt_ok:<address>`
-  per accessory), `on_standby` plus five item switches and an order string for the standby pill, and
-  the typed city. `IslandService.allow()` is the whitelist: it decides whether an event may exist at
-  all, then `Prefs.enabled()` drops a card whose own switch is off, both before the overlay is
-  touched.
+  per accessory), `on_standby` plus five item switches and an order string for the standby pill, the
+  typed city, and the two look values `look_color` (`#RRGGBB`) and `look_alpha` (`0`–`100`).
+  `IslandService.allow()` is the whitelist: it decides whether an event may exist at all, then
+  `Prefs.enabled()` drops a card whose own switch is off, both before the overlay is touched.
+- `Look` (`Look.java`) holds the two look values and turns them into what a drawable wants: the tint
+  with the chosen opacity folded in, plus a border that fades with it. Both overlays read it when they
+  are built and again on `ACTION_LOOK`, which the settings screen sends on every slider move, so a
+  change lands in both windows at once; with the service stopped the request is dropped instead of
+  starting it.
 - `Lyric` parses LRC (`[mm:ss.cc]` lines, credit lines filtered out) and answers "which line at this
   position" by binary search; `LyricSource` does the one HTTPS lookup per track with a 6 s timeout,
   a 512 KB cap and a 16 entry memory-only cache.

@@ -127,8 +127,8 @@ public final class IslandView extends FrameLayout {
 
         card = new FrameLayout(context);
         cardBackground.setShape(GradientDrawable.RECTANGLE);
-        cardBackground.setColor(Color.BLACK);
-        cardBackground.setStroke(dp(1), 0xFF23232A);
+        cardBackground.setColor(Look.background(context));
+        cardBackground.setStroke(dp(1), Look.stroke(context));
         cardBackground.setCornerRadius(dp(H_COLLAPSED_DP) / 2f);
         card.setBackground(cardBackground);
         addView(card, new FrameLayout.LayoutParams(dp(W_COLLAPSED_DP), dp(H_COLLAPSED_DP)));
@@ -420,6 +420,14 @@ public final class IslandView extends FrameLayout {
     void setChips(java.util.List<IslandEvent.Bt> devices) {
         renderBt(devices);
         applyFraction(fraction);
+    }
+
+    /** Repaints the pill after the colour or the opacity changed in the settings screen. */
+    void refreshLook() {
+        cardBackground.setColor(Look.background(getContext()));
+        cardBackground.setStroke(dp(1), Look.stroke(getContext()));
+        card.invalidate();
+        invalidate();
     }
     boolean isExpanded() {
         return expanded;

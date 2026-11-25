@@ -37,6 +37,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
 
     static final String ACTION_STOP = "com.kreston8.islandcn.STOP";
 
+    /** Repaint request from the settings screen: the colour or the opacity changed. */
+    static final String ACTION_LOOK = "com.kreston8.islandcn.LOOK";
+
     private static final String CHANNEL_ID = "island_status";
     private static final int NOTIFICATION_ID = 42;
     private static final long AUTO_COLLAPSE_MS = 4200L;
@@ -143,6 +146,19 @@ public final class IslandService extends Service implements IslandBridge.Sink {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        // A look change repaints both windows on the spot: the standby pill would otherwise keep the
+        // old colour until its next four-second tick.
+        if (intent != null && ACTION_LOOK.equals(intent.getAction())) {
+            if (island != null) {
+                island.refreshLook();
+            }
+            if (standby != null) {
+                standby.refreshLook();
+            }
+            if (running) {
+                return START_STICKY;
+            }
+        }
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
             stopSelf();
             return START_NOT_STICKY;

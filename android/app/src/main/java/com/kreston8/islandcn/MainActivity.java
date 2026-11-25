@@ -17,6 +17,7 @@ import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.SeekBar;
 import android.widget.Toast;
 
 import java.util.function.Consumer;
@@ -44,6 +45,9 @@ public final class MainActivity extends Activity {
     private LinearLayout standbyRows;
     private TextView weatherState;
     private TextView cityHint;
+    private LinearLayout swatches;
+    private SeekBar alphaBar;
+    private TextView alphaValue;
     /** Every first-level switch, so resume can re-read them and rebuild the open second level. */
     private final java.util.List<Primary> primaries = new java.util.ArrayList<Primary>();
 
@@ -134,6 +138,40 @@ public final class MainActivity extends Activity {
         addFill(featuresCard, text(R.string.music_hint, 12f, 0xFF8A8A94, false), 12);
         addFill(featuresCard, text(R.string.lyrics_hint, 12f, 0xFF8A8A94, false), 6);
         addFill(root, featuresCard, 14);
+
+        LinearLayout lookCard = card();
+        addFill(lookCard, text(R.string.look_title, 16f, COLOR_PRIMARY, true), 0);
+        addFill(lookCard, text(R.string.look_desc, 13f, COLOR_SECONDARY, false), 6);
+        addFill(lookCard, text(R.string.look_color, 13f, COLOR_PRIMARY, true), 14);
+        swatches = new LinearLayout(this);
+        swatches.setOrientation(LinearLayout.HORIZONTAL);
+        addFill(lookCard, swatches, 8);
+        renderSwatches();
+        addFill(lookCard, text(R.string.look_alpha, 13f, COLOR_PRIMARY, true), 16);
+        alphaBar = new SeekBar(this);
+        alphaBar.setMax(100);
+        alphaBar.setProgress(Look.percent(this));
+        alphaBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar bar, int value, boolean fromUser) {
+                if (fromUser) {
+                    applyLook(value);
+                }
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar bar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar bar) {
+            }
+        });
+        addFill(lookCard, alphaBar, 4);
+        alphaValue = text(R.string.look_alpha, 12f, 0xFF8A8A94, false);
+        alphaValue.setText(getString(R.string.look_alpha_fmt, Look.percent(this)));
+        addFill(lookCard, alphaValue, 2);
+        addFill(root, lookCard, 14);
 
         LinearLayout btCard = card();
         addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
@@ -616,6 +654,48 @@ public final class MainActivity extends Activity {
             return;
         }
         requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, 4);
+    }
+
+    /**
+     * One round swatch per preset, the chosen one ringed in white.
+     *
+     * <p>Every preset is dark because every line on the island is white text; the ring is the only
+     * state, so the row stays a single line.
+     */
+    private void renderSwatches() {
+        if (swatches == null) {
+            return;
+        }
+        swatches.removeAllViews();
+        int chosen = Look.color(this) & 0xFFFFFF;
+        for (int i = 0; i < Look.presets(); i++) {
+            final int color = Look.preset(i);
+            boolean on = (color & 0xFFFFFF) == chosen;
+            GradientDrawable dot = new GradientDrawable();
+            dot.setShape(GradientDrawable.OVAL);
+            dot.setColor(color);
+            dot.setStroke(dp(on ? 2.5f : 1f), on ? 0xFFFFFFFF : 0xFF3C3C46);
+            View swatch = new View(this);
+            swatch.setBackground(dot);
+            swatch.setContentDescription(getString(R.string.look_color));
+            swatch.setOnClickListener(v -> {
+                Look.setColor(MainActivity.this, color);
+                renderSwatches();
+                Look.ping(MainActivity.this);
+            });
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(dp(34), dp(34));
+            params.rightMargin = dp(10);
+            swatches.addView(swatch, params);
+        }
+    }
+
+    /** Stores the new opacity and repaints the two overlays straight away. */
+    private void applyLook(int percent) {
+        Look.setPercent(this, percent);
+        if (alphaValue != null) {
+            alphaValue.setText(getString(R.string.look_alpha_fmt, percent));
+        }
+        Look.ping(this);
     }
 
     private Button smallButton(int resId, View.OnClickListener listener) {

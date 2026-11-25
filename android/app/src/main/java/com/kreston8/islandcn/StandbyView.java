@@ -4,6 +4,8 @@ import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
 import android.content.Intent;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.content.res.Resources;
@@ -14,11 +16,13 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -53,20 +57,23 @@ final class StandbyView extends FrameLayout {
     private static final int GAP_DP = 8;
 
     private final LinearLayout row;
+    private final GradientDrawable background;
     private final float density;
 
     private String signature = "";
     private boolean hasContent;
     private DaozaiView face;
+    /** The lines the pill is showing, joined for the long-press copy. */
+    private String copyText = "";
 
     StandbyView(Context context) {
         super(context);
         density = getResources().getDisplayMetrics().density;
 
-        GradientDrawable background = new GradientDrawable();
+        background = new GradientDrawable();
         background.setShape(GradientDrawable.RECTANGLE);
-        background.setColor(Color.BLACK);
-        background.setStroke(dp(1), 0xFF23232A);
+        background.setColor(Look.background(context));
+        background.setStroke(dp(1), Look.stroke(context));
         background.setCornerRadius(dp(R_DP));
         setBackground(background);
 
@@ -76,6 +83,10 @@ final class StandbyView extends FrameLayout {
         row.setPadding(dp(12), 0, dp(12), 0);
         addView(row, new LayoutParams(LayoutParams.WRAP_CONTENT, dp(H_DP)));
         setVisibility(View.INVISIBLE);
+
+        // Long press copies what the pill shows; it sits on the desktop, where a long press has no
+        // other meaning.
+        setOnLongClickListener(v -> copyPill());
     }
 
     boolean hasContent() {
@@ -142,6 +153,7 @@ final class StandbyView extends FrameLayout {
         face = null;
         row.removeAllViews();
         int count = 0;
+        StringBuilder copy = new StringBuilder();
         for (String item : order) {
             if ("weather".equals(item)) {
                 if (!weatherOn || temperature == null) {
@@ -149,12 +161,14 @@ final class StandbyView extends FrameLayout {
                 }
                 row.addView(weatherIcon(code, temperature));
                 count++;
+                appendPart(copy, temperature);
             } else if ("aqi".equals(item)) {
                 if (!aqiOn || air == null || air.isEmpty()) {
                     continue;
                 }
                 TextView badge = label("AQI " + air, aqiColor(air), 12.5f, true);
                 row.addView(badge, margin());
+                appendPart(copy, "AQI " + air);
                 count++;
             } else if ("puppy".equals(item)) {
                 if (!faceOn) {
@@ -177,6 +191,7 @@ final class StandbyView extends FrameLayout {
                 line.setSingleLine(true);
                 line.setEllipsize(TextUtils.TruncateAt.END);
                 row.addView(line, margin());
+                appendPart(copy, quote);
                 count++;
             } else if ("bt".equals(item)) {
                 LinearLayout accessories = btChips(devices);
@@ -185,10 +200,75 @@ final class StandbyView extends FrameLayout {
                 }
                 row.addView(accessories, margin());
                 count++;
+                appendDevices(copy, devices);
             }
         }
+        copyText = copy.toString();
         hasContent = count > 0;
         return hasContent;
+    }
+
+    /** Repaints the pill after the colour or the opacity changed in the settings screen. */
+    void refreshLook() {
+        background.setColor(Look.background(getContext()));
+        background.setStroke(dp(1), Look.stroke(getContext()));
+        invalidate();
+    }
+
+    /**
+     * Copies the lines the pill is showing, so a long press on the quote gives the quote alone.
+     *
+     * @return true when there was something to copy, which swallows the long press.
+     */
+    private boolean copyPill() {
+        if (copyText.isEmpty()) {
+            return false;
+        }
+        try {
+            ClipboardManager clipboard =
+                    (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            if (clipboard == null) {
+                return false;
+            }
+            clipboard.setPrimaryClip(ClipData.newPlainText(
+                    getContext().getString(R.string.app_name), copyText));
+            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+            Toast.makeText(getContext(), R.string.copied_all, Toast.LENGTH_SHORT).show();
+            return true;
+        } catch (Throwable failure) {
+            return false;
+        }
+    }
+
+    private static void appendPart(StringBuilder out, String part) {
+        if (part == null) {
+            return;
+        }
+        String value = part.trim();
+        if (value.isEmpty()) {
+            return;
+        }
+        if (out.length() > 0) {
+            out.append(" · ");
+        }
+        out.append(value);
+    }
+
+    /** Only the accessories the pill actually drew, which is at most three. */
+    private static void appendDevices(StringBuilder out, java.util.List<IslandEvent.Bt> devices) {
+        if (devices == null) {
+            return;
+        }
+        int shown = 0;
+        for (IslandEvent.Bt device : devices) {
+            if (device == null || shown >= 3) {
+                break;
+            }
+            String level = device.level >= 0 ? device.level + "%" : "--";
+            String name = device.name == null || device.name.isEmpty() ? "蓝牙" : device.name;
+            appendPart(out, name + " " + level);
+            shown++;
+        }
     }
 
     /** A weather glyph plus the degree reading, sized to sit inside the 44 dp pill. */

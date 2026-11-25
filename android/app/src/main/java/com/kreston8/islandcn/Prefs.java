@@ -40,6 +40,9 @@ final class Prefs {
     static final String KEY_STANDBY_ORDER = "sb_order";
     /** City name typed by the user; the only reason the weather request is ever made. */
     static final String KEY_CITY = "weather_city";
+    /** Look: the pill tint and its opacity, both stored as text so they need no typed reader. */
+    static final String KEY_LOOK_COLOR = "look_color";
+    static final String KEY_LOOK_ALPHA = "look_alpha";
     /**
      * Notification detail switches: one master ("only WeChat plus SMS pickup codes") and one switch
      * per source, so an OTP from a shopping app or a group-chat summary never reaches the island.

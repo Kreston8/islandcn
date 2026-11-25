@@ -37,6 +37,12 @@
     <string name="tag_todo">待办</string>
     <string name="copy_hint">点击复制</string>
     <string name="copied">已复制</string>
+
+    <string name="look_title">外观</string>
+    <string name="look_desc">岛的底色和不透明度，弹出卡片与桌面常驻条同时生效，改完立刻能看到。色板只给深色：岛上的字是白的，浅底会看不清。</string>
+    <string name="look_color">颜色</string>
+    <string name="look_alpha">不透明度</string>
+    <string name="look_alpha_fmt">当前 %1$d%%</string>
     <string name="eta_minutes">还有 %1$d 分钟送达</string>
     <string name="eta_arriving">即将送达</string>
 
