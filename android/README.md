@@ -25,9 +25,13 @@ the title, body and application, four by their own sources:
 | 导航 | ongoing notification from a whitelisted map app | tag + the next turn |
 | 音乐 | a playing media session, shown only while the launcher is in front | 44 dp strip: album art + one lyric line, lit character by character |
 
-Every card expands to the same 44 dp strip: one app icon, one bold line, one body line. Two lines are
-all that height holds, so the copyable code moved into the title row and a live countdown replaces the
-body line instead of adding a third one.
+Every card expands to the same 46 dp strip: one icon, one bold line, one body line. The icon is the
+notifying app's own — its large icon first (WeChat and QQ put the contact's avatar there), then a
+`Person` avatar from a `MessagingStyle` notification, then the launcher icon, then the small icon — so a
+card says which app it came from. Two lines are all that height holds, so the copyable code moved into
+the title row and a live countdown replaces the body line instead of adding a third one. The pill starts
+at 250 dp, widens until the sentence fits up to the screen edge, and only past that scrolls a marquee;
+the lyric line is exempt because the per-character highlight owns it.
 
 The code rows copy to the clipboard and collapse the island; the notification itself is left in the
 shade so the copy is never destructive.
@@ -35,9 +39,9 @@ shade so the copy is never destructive.
 ### Bluetooth battery chips
 
 When 蓝牙设备电量 is on, the right end of the pill shows one chip per connected accessory — watch,
-earbuds, anything else — as an icon with the percentage underneath, up to three devices. The chips
-appear on every card, including the music/lyric strip, and the pill widens instead of squeezing the
-text.
+earbuds, anything else — as an icon with the percentage underneath, up to three devices. A lyric line
+always carries them, whatever the switch says, because that is the moment the level matters; the pill
+widens instead of squeezing the text.
 
 Android has no public battery API for accessories. The percentage is whatever the device last pushed
 through the platform's own `BATTERY_LEVEL_CHANGED` broadcast, so:
@@ -52,13 +56,19 @@ through the platform's own `BATTERY_LEVEL_CHANGED` broadcast, so:
 When 桌面常驻 is on and nothing else is on screen, a second, narrower pill stays on the launcher with
 the items you enabled:
 
-- **天气温度** — the current temperature, e.g. `23°`. Needs a city name typed in the app; there is no
-  location permission and no GPS.
-- **小狗头** — the golden-retriever head, swaying about 7° left and right on a 900 ms loop.
+- **天气温度** — the current temperature with a weather icon picked from the WMO code, e.g. `23°`.
+  Needs a city name typed in the app; there is no location permission and no GPS.
+- **空气质量 AQI** — the US AQI for the same city, graded into four colours (<50 green, <100 yellow,
+  <150 orange, above that red).
+- **岛仔表情** — a hand-drawn face that blinks, breathes and sways the whole time it is on screen. It
+  is an approximation of the 岛仔 mascot drawn in code, not the original artwork.
 - **每日一句** — one line of encouragement, chosen by day of year so it changes once a day.
 
-The three items can be reordered with 上移 / 下移, and the pill disappears the moment a card appears,
-the launcher is no longer in front, or the screen is locked.
+The four items can be reordered with 上移 / 下移. While a notification card exists as well the two swap
+every 3 seconds, and closing that notification by hand leaves the standby pill alone on screen. A lyric
+line outranks both: it keeps the pill, gives a fresh notification exactly 3 seconds, then comes back at
+the position the track has reached meanwhile. The pill still disappears the moment the launcher is no
+longer in front or the screen is locked.
 
 ## How it works
 
@@ -92,10 +102,13 @@ the launcher is no longer in front, or the screen is locked.
   last known level per device address in `SharedPreferences`, and lists connected devices through
   `BluetoothManager.getConnectedDevices` for the `GATT` and `HEADSET` profiles. Every call is guarded:
   without `BLUETOOTH_CONNECT` it returns nothing instead of crashing the overlay.
-- `StandbyView` (`StandbyView.java`) renders the standby pill and owns the temperature lookup:
-  geocoding (`geocoding-api.open-meteo.com`) turns the typed city into coordinates, then
-  `api.open-meteo.com/v1/forecast?current=temperature_2m` returns one number. 6 s timeout, memory
-  cache for 30 minutes, one request in flight, nothing requested without a city.
+- `StandbyView` (`StandbyView.java`) renders the standby pill and owns both lookups: geocoding
+  (`geocoding-api.open-meteo.com`) turns the typed city into coordinates, then
+  `api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code` returns the temperature and the
+  WMO code that picks its icon, and `air-quality-api.open-meteo.com/v1/air-quality?current=us_aqi`
+  adds the AQI. 6 s timeout, memory cache for 30 minutes, one request in flight, nothing requested
+  without a city. `DaozaiView` (`DaozaiView.java`) draws the face: every frame is a pure function of
+  the clock at 25 fps, so there are no bitmaps and nothing to load.
 - `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
   process.
 - `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
@@ -105,7 +118,7 @@ the launcher is no longer in front, or the screen is locked.
   not the launcher hides the strip — and it runs only while a session is playing: pause, screen off
   or a missing usage-access grant cancels it. One card per track.
 - `Prefs` (`Prefs.java`) is the switch store: one boolean per card kind, `on_lyrics` for the lyric
-  lookup, `on_bt` for the battery chips, `on_standby` plus three item switches and an order string for
+  lookup, `on_bt` for the battery chips, `on_standby` plus four item switches and an order string for
   the standby pill. `IslandService.onIslandEvent` drops a card whose switch is off before the overlay
   is touched at all.
 - `Lyric` parses LRC (`[mm:ss.cc]` lines, credit lines filtered out) and answers "which line at this
@@ -137,7 +150,7 @@ Every feature has its own switch in the app, 10 for the cards plus the additions
 | 联网歌词 | on | the one lyric lookup per track |
 | 蓝牙设备电量 | off | battery chips at the right end of the pill |
 | 桌面常驻 | off | the standby pill on the launcher |
-| 天气温度 / 小狗头 / 每日一句 | on | which items the standby pill contains |
+| 天气温度 / 空气质量 AQI / 岛仔表情 / 每日一句 | on | which items the standby pill contains |
 | 城市 | empty | no city means no weather request at all |
 
 ## Permissions the user has to grant
@@ -186,8 +199,10 @@ Every feature has its own switch in the app, 10 for the cards plus the additions
 - The music strip and the standby pill are **desktop only** and need the **usage access** grant;
   without it the app cannot tell the launcher from an app, so the strip falls back to showing over any
   screen and the standby pill never appears.
-- The temperature needs a city typed by hand and hits Open-Meteo; the accessory percentage needs the
-  device to report and `BLUETOOTH_CONNECT`. Neither is a promise the system makes.
+- 天气温度 and 空气质量 AQI need a city typed by hand and hit two hosts on Open-Meteo: `api.open-meteo.com`
+  for the forecast and `air-quality-api.open-meteo.com` for the AQI, with
+  `geocoding-api.open-meteo.com` turning the name into coordinates. The accessory percentage needs the
+  device to report and `BLUETOOTH_CONNECT`. None of that is a promise the system makes.
 
 ## Build
 

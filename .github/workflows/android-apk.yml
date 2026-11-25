@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.4.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.8.<run number>)"
         required: false
         default: ""
   push:
@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-             -PversionName="2.7.${{ github.run_number }}"
+             -PversionName="2.8.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-              "dist/islandcn-island-2.7.${{ github.run_number }}.apk"
+              "dist/islandcn-island-2.8.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,25 +97,31 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.7.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.8.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
           ## English
 
           **What is new in this build**
-          - **Bluetooth battery chips.** With 蓝牙设备电量 on, the right end of the island shows one chip per connected accessory: the device icon on top, the percentage that device itself reported underneath, up to three devices. They also sit on the music/lyric strip, and the pill widens instead of squeezing the text.
-          - **A standby pill on the desktop (桌面常驻).** While nothing else is on screen it keeps the current temperature (23°), the golden-retriever head swaying gently left and right, and one encouraging line a day. Each item has its own switch and 上移 / 下移 reorders them.
-          - Both are off by default, so an existing install looks exactly as before until you turn them on. Signing is unchanged: this installs straight over 2.6.13.
+          - **The island sits higher.** Its top edge now lines up with the status bar instead of a few dp below it, so it stops covering the first row of whatever is underneath.
+          - **The standby pill stays on the desktop.** The five-second disappearance is fixed: an empty home-screen check was being read as "not the launcher" and hid the pill; it now keeps the previous answer.
+          - **Cards take turns.** While a notification card and the standby pill both exist they swap every 3 seconds; close the notification by hand and only the standby pill is left. A lyric line wins outright: it stays on screen and gives a fresh notification exactly 3 seconds before coming back where the line should be by now.
+          - **Headset battery on the lyric strip, always.** With music playing the Bluetooth chips are drawn at the far right whether or not 蓝牙设备电量 is on.
+          - **岛仔 replaces the puppy**, and **AQI** joins the standby items: a hand-drawn face that blinks, breathes and sways all the time, plus a US AQI reading with the same four-colour grading, on its own switch and reorderable.
+          - **Icons and text.** A card now shows the notifying app's own icon — WeChat and QQ put the contact's avatar in the large icon, so that is what you see, with the app icon as the fallback. Fonts went up a step, the pill widens to fit the sentence up to the screen edge before it starts scrolling, and lyric lines stay put because the per-character highlight owns them.
 
-          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`, so there is nothing to choose between. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Permissions, limits and the switches table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
+          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`, so there is nothing to choose between. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Signing is unchanged, so this installs straight over 2.7.15. The temperature and AQI items only run when you type a city and reach api.open-meteo.com and air-quality-api.open-meteo.com; lyrics reach music.163.com. Permissions, limits and the switches table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
 
           ## 中文
 
           **本次更新**
-          - **蓝牙设备电量。** 打开后胶囊最右端每个已连接设备一个方块：上面是设备图标，下面是它自己上报的百分比，最多三个。「播放歌词时」也一起显示，胶囊变宽，不会把文字挤掉。
-          - **桌面常驻。** 屏幕上没有别的卡片时，桌面留一条窄胶囊：当前气温（23°）、轻微左右摇晃的金毛头像、每天一句励志话。三项各有开关，「上移 / 下移」调整前后顺序。
-          - 两项默认关闭，升级后外观和以前完全一样，想用再打开。签名未变，可直接覆盖 2.6.13 安装。
+          - **灵动岛往上挪了。** 顶部和状态栏对齐，不再压住下面内容的第一行。
+          - **桌面常驻不再五秒消失。** 原因是「桌面检测」拿到空结果时被当成「不在桌面」而收起胶囊，现在空结果保留上一次的结论。
+          - **卡片轮流显示。** 通知卡片和常驻胶囊同时存在时每 3 秒切换；手动关掉通知就只剩常驻。歌词优先级最高：一直显示，来通知只让位 3 秒，然后按已经过去的时间回到该唱的那一句。
+          - **歌词条固定显示耳机电量。** 播放音乐时不管「蓝牙设备电量」开关是否打开，最右端都会画上电量方块。
+          - **小狗换成岛仔**，常驻新增 **空气质量 AQI**：一个会眨眼、呼吸、左右轻晃的手绘脸，加上按四级配色显示的 US AQI，各有独立开关，可调整顺序。
+          - **图标与文字。** 卡片显示发通知那个应用自己的图标——微信、QQ 会把联系人头像放进大图标，所以看到的就是头像，取不到时退回应用图标。字号整体加大一档，句子长时胶囊先加宽到屏幕边缘，仍放不下才左右滚动；歌词行不滚动，因为逐字高亮要独占它。
 
-          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`，不存在选哪个的问题。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
+          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`，不存在选哪个的问题。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。签名未变，可直接覆盖 2.7.15 安装。温度与 AQI 只有手填城市后才会联网，访问 api.open-meteo.com 与 air-quality-api.open-meteo.com；歌词访问 music.163.com。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

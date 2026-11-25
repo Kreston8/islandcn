@@ -49,21 +49,25 @@ public final class IslandView extends FrameLayout {
     private static final int W_COLLAPSED_DP = 78;
     private static final int H_COLLAPSED_DP = 32;
     private static final int H_EXPANDED_DP = 44;
-    private static final int W_EXPANDED_MAX_DP = 360;
+    private static final int H_EXPANDED_DP = 46;
+    private static final int W_EXPANDED_MIN_DP = 250;
     private static final float R_EXPANDED_DP = 22f;
     private static final long EXPAND_MS = 420L;
     private static final long COLLAPSE_MS = 280L;
     private static final long TICK_MS = 15000L;
     private static final long CYCLE_MS = 2600L;
-    private static final int H_MUSIC_DP = 44;
-    private static final int W_MUSIC_MAX_DP = 232;
+    private static final int H_MUSIC_DP = 46;
+    private static final int W_MUSIC_MIN_DP = 240;
     private static final long LYRIC_MS = 100L;
     private static final int BT_MAX = 3;
     /** Roughly one chip: the icon is 14 dp, the percentage under it a little wider. */
     private static final int BT_CHIP_DP = 26;
 
     private final float density;
-    private final int expandedWidthPx;
+    private final int minWidthPx;
+    private final int maxWidthPx;
+    /** Current width before the Bluetooth chips, recomputed for every card. */
+    private int baseWidthPx;
     private final FrameLayout card;
     private final GradientDrawable cardBackground = new GradientDrawable();
     private final ImageView collapsedIcon;
@@ -96,7 +100,7 @@ public final class IslandView extends FrameLayout {
     private int expandedHeightDp = H_EXPANDED_DP;
     private CharSequence[] cycle;
     private int cycleIndex;
-    private final int musicWidthPx;
+    private final int musicMinPx;
     private int cardWidthPx;
     private float expandedRadiusDp = R_EXPANDED_DP;
     private final Runnable lyricTick = this::tickLyric;
@@ -109,14 +113,13 @@ public final class IslandView extends FrameLayout {
     IslandView(Context context) {
         super(context);
         density = getResources().getDisplayMetrics().density;
-        expandedWidthPx = Math.min(
+        maxWidthPx = Math.min(
                 dp(W_EXPANDED_MAX_DP),
                 getResources().getDisplayMetrics().widthPixels - dp(24));
-
-        musicWidthPx = Math.min(
-                dp(W_MUSIC_MAX_DP),
-                getResources().getDisplayMetrics().widthPixels - dp(24));
-        cardWidthPx = expandedWidthPx;
+        minWidthPx = Math.min(dp(W_EXPANDED_MIN_DP), maxWidthPx);
+        musicMinPx = Math.min(dp(W_MUSIC_MIN_DP), maxWidthPx);
+        baseWidthPx = minWidthPx;
+        cardWidthPx = minWidthPx;
 
         card = new FrameLayout(context);
         cardBackground.setShape(GradientDrawable.RECTANGLE);
@@ -158,7 +161,7 @@ public final class IslandView extends FrameLayout {
 
         tagView = new TextView(context);
         tagView.setTextColor(0xFF7CE38B);
-        tagView.setTextSize(10f);
+        tagView.setTextSize(12f);
         tagView.setTypeface(Typeface.DEFAULT_BOLD);
         tagView.setBackground(rounded(0xFF1E2A22, 6f));
         tagView.setPadding(dp(6), dp(2), dp(6), dp(2));
@@ -170,7 +173,7 @@ public final class IslandView extends FrameLayout {
 
         titleView = new TextView(context);
         titleView.setTextColor(Color.WHITE);
-        titleView.setTextSize(12.5f);
+        titleView.setTextSize(15.5f);
         titleView.setTypeface(Typeface.DEFAULT_BOLD);
         titleView.setSingleLine(true);
         titleView.setEllipsize(TextUtils.TruncateAt.END);
@@ -179,7 +182,7 @@ public final class IslandView extends FrameLayout {
 
         textView = new TextView(context);
         textView.setTextColor(0xFFB9B9C2);
-        textView.setTextSize(11f);
+        textView.setTextSize(13.5f);
         textView.setMaxLines(1);
         textView.setEllipsize(TextUtils.TruncateAt.END);
         LinearLayout.LayoutParams textParams = new LinearLayout.LayoutParams(
@@ -199,7 +202,7 @@ public final class IslandView extends FrameLayout {
 
         codeView = new TextView(context);
         codeView.setTextColor(0xFF7CE38B);
-        codeView.setTextSize(12f);
+        codeView.setTextSize(14.5f);
         codeView.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
         codeView.setLetterSpacing(0.14f);
         codeView.setBackground(rounded(0xFF1E2A22, 8f));
@@ -210,7 +213,7 @@ public final class IslandView extends FrameLayout {
         TextView copyHint = new TextView(context);
         copyHint.setText(R.string.copy_hint);
         copyHint.setTextColor(0xFF8A8A94);
-        copyHint.setTextSize(9f);
+        copyHint.setTextSize(11f);
         LinearLayout.LayoutParams hintParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         hintParams.leftMargin = dp(5);
@@ -223,7 +226,7 @@ public final class IslandView extends FrameLayout {
 
         countdownView = new TextView(context);
         countdownView.setTextColor(0xFFF0B860);
-        countdownView.setTextSize(10f);
+        countdownView.setTextSize(13f);
         countdownView.setVisibility(View.GONE);
         LinearLayout.LayoutParams countdownParams = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
@@ -243,7 +246,7 @@ public final class IslandView extends FrameLayout {
         TextView close = new TextView(context);
         close.setText("\u00d7");
         close.setTextColor(0xFF8A8A94);
-        close.setTextSize(16f);
+        close.setTextSize(20f);
         close.setPadding(dp(8), dp(8), dp(8), dp(8));
         close.setOnClickListener(v -> {
             if (actions != null) {
@@ -292,7 +295,6 @@ public final class IslandView extends FrameLayout {
         }
         boolean music = event.kind == IslandEvent.KIND_MUSIC;
         setMusicMode(music);
-        renderBt(event.bt);
         if (event.icon != null) {
             appIcon.setImageBitmap(event.icon);
             collapsedIcon.setImageBitmap(event.icon);
@@ -341,7 +343,6 @@ public final class IslandView extends FrameLayout {
 
         // Every card is the same 44 dp strip: icon, one title line, one body line.
         expandedHeightDp = H_EXPANDED_DP;
-        applyFraction(fraction);
         boolean karaoke =
                 startLyric(event.kind == IslandEvent.KIND_MUSIC ? event.lyric : null, event.position);
         if (music && !karaoke) {
@@ -350,6 +351,11 @@ public final class IslandView extends FrameLayout {
             textView.setText(heading);
         }
 
+        // Grow to fit the line first; only a line that still does not fit scrolls.
+        fitWidth();
+        renderBt(event.bt);
+        applyFraction(fraction);
+        applyScrolling(!karaoke);
         setContentDescription(event.appLabel);
     }
 
@@ -489,25 +495,27 @@ public final class IslandView extends FrameLayout {
             tagView.setVisibility(View.GONE);
             copyRow.setVisibility(View.GONE);
             countdownView.setVisibility(View.GONE);
-            textView.setTextSize(13f);
+            textView.setTextSize(16.5f);
             textView.setMaxLines(1);
             textView.setTextColor(Color.WHITE);
             icon.width = dp(28);
             icon.height = dp(28);
             appIcon.setLayoutParams(icon);
             expandedBox.setPadding(dp(10), 0, dp(12), 0);
-            cardWidthPx = musicWidthPx;
+            baseWidthPx = musicMinPx;
+            cardWidthPx = musicMinPx;
             expandedRadiusDp = H_MUSIC_DP / 2f;
         } else {
             headerRow.setVisibility(View.VISIBLE);
-            textView.setTextSize(11f);
+            textView.setTextSize(13.5f);
             textView.setMaxLines(1);
             textView.setTextColor(0xFFB9B9C2);
             icon.width = dp(28);
             icon.height = dp(28);
             appIcon.setLayoutParams(icon);
             expandedBox.setPadding(dp(10), 0, dp(6), 0);
-            cardWidthPx = expandedWidthPx;
+            baseWidthPx = minWidthPx;
+            cardWidthPx = minWidthPx;
             expandedRadiusDp = R_EXPANDED_DP;
         }
     }
@@ -615,10 +623,9 @@ public final class IslandView extends FrameLayout {
     private void renderBt(java.util.List<IslandEvent.Bt> devices) {
         btRow.removeAllViews();
         int count = devices == null ? 0 : Math.min(devices.size(), BT_MAX);
-        int maxWidthPx = getResources().getDisplayMetrics().widthPixels - dp(24);
         if (count == 0) {
             btRow.setVisibility(View.GONE);
-            cardWidthPx = Math.min(maxWidthPx, musicMode ? musicWidthPx : expandedWidthPx);
+            cardWidthPx = baseWidthPx;
             return;
         }
         for (int i = 0; i < count; i++) {
@@ -635,8 +642,70 @@ public final class IslandView extends FrameLayout {
         }
         btRow.setVisibility(View.VISIBLE);
         // The chips sit beside the text instead of eating it, so the pill grows by their width.
-        int base = musicMode ? musicWidthPx : expandedWidthPx;
-        cardWidthPx = Math.min(maxWidthPx, base + dp(BT_CHIP_DP) * count);
+        cardWidthPx = Math.min(maxWidthPx, baseWidthPx + dp(BT_CHIP_DP) * count);
+    }
+
+    /**
+     * Grows the pill to fit its text instead of cutting it off.
+     *
+     * <p>The old fixed widths are now minimums: a short message keeps the familiar size, a long one
+     * widens until the line fits, and only past {@link #maxWidthPx} does the marquee take over.
+     * Measuring the text views' own paints keeps the estimate honest with the applied fonts.
+     */
+    private void fitWidth() {
+        int chrome = musicMode
+                ? dp(10) + dp(28) + dp(10) + dp(12) + dp(6)
+                : dp(10) + dp(28) + dp(10) + dp(4) + dp(30) + dp(10);
+        int header = 0;
+        if (headerRow.getVisibility() == View.VISIBLE) {
+            if (tagView.getVisibility() == View.VISIBLE) {
+                header += Math.round(tagView.getPaint().measureText(tagView.getText().toString()))
+                        + tagView.getPaddingLeft() + tagView.getPaddingRight() + dp(6);
+            }
+            if (copyRow.getVisibility() == View.VISIBLE) {
+                header += measure(codeView) + dp(6) + codeView.getPaddingLeft()
+                        + codeView.getPaddingRight() + dp(40);
+            }
+        }
+        int title = headerRow.getVisibility() == View.VISIBLE ? measure(titleView) : 0;
+        int body = measure(textView);
+        if (countdownView.getVisibility() == View.VISIBLE) {
+            body = Math.max(body, measure(countdownView));
+        }
+        int need = chrome + Math.max(title, body + header);
+        baseWidthPx = Math.max(musicMode ? musicMinPx : minWidthPx,
+                Math.min(maxWidthPx, need));
+        cardWidthPx = baseWidthPx;
+    }
+
+    private static int measure(TextView view) {
+        CharSequence text = view.getText();
+        if (text == null || text.length() == 0) {
+            return 0;
+        }
+        return Math.round(view.getPaint().measureText(text, 0, text.length()));
+    }
+
+    /**
+     * Turns marquee on for the two text lines, or off while karaoke paints them.
+     *
+     * <p>The lit characters are rebuilt several times a second; a marquee restarts whenever the
+     * text changes, so the lyric line would jump back to the left mid-word. Lyric lines therefore
+     * ellipsize instead of scrolling.
+     */
+    private void applyScrolling(boolean scroll) {
+        TextView[] lines = {titleView, textView};
+        for (TextView view : lines) {
+            view.setSingleLine(true);
+            if (scroll) {
+                view.setEllipsize(TextUtils.TruncateAt.MARQUEE);
+                view.setMarqueeRepeatLimit(-1);
+                view.setSelected(true);
+            } else {
+                view.setEllipsize(TextUtils.TruncateAt.END);
+                view.setSelected(false);
+            }
+        }
     }
 
     private View btChip(IslandEvent.Bt device) {
@@ -650,7 +719,7 @@ public final class IslandView extends FrameLayout {
         TextView percent = new TextView(getContext());
         percent.setText(device.level < 0 ? "--" : device.level + "%");
         percent.setTextColor(device.level >= 0 && device.level <= 20 ? 0xFFF0B860 : 0xFFB9B9C2);
-        percent.setTextSize(8.5f);
+        percent.setTextSize(10.5f);
         percent.setIncludeFontPadding(false);
         percent.setSingleLine(true);
         chip.addView(percent, new LinearLayout.LayoutParams(

@@ -141,6 +141,7 @@ public final class MainActivity extends Activity {
         addFill(standbyCard, text(R.string.standby_hint, 13f, COLOR_SECONDARY, false), 6);
         switchRow(standbyCard, R.string.label_standby_enable, Prefs.KEY_STANDBY, false);
         switchRow(standbyCard, R.string.label_standby_weather, Prefs.KEY_STANDBY_WEATHER);
+        switchRow(standbyCard, R.string.label_standby_aqi, Prefs.KEY_STANDBY_AQI);
         switchRow(standbyCard, R.string.label_standby_puppy, Prefs.KEY_STANDBY_PUPPY);
         switchRow(standbyCard, R.string.label_standby_quote, Prefs.KEY_STANDBY_QUOTE);
         addFill(standbyCard, text(R.string.standby_order_title, 13f, COLOR_PRIMARY, true), 14);
@@ -318,6 +319,7 @@ public final class MainActivity extends Activity {
     private boolean isStandbyKey(String key) {
         return Prefs.KEY_STANDBY.equals(key)
                 || Prefs.KEY_STANDBY_WEATHER.equals(key)
+                || Prefs.KEY_STANDBY_AQI.equals(key)
                 || Prefs.KEY_STANDBY_PUPPY.equals(key)
                 || Prefs.KEY_STANDBY_QUOTE.equals(key);
     }
@@ -360,6 +362,9 @@ public final class MainActivity extends Activity {
         }
         if ("puppy".equals(item)) {
             return R.string.label_standby_puppy;
+        }
+        if ("aqi".equals(item)) {
+            return R.string.label_standby_aqi;
         }
         return R.string.label_standby_quote;
     }

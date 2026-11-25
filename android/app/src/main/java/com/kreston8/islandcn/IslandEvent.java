@@ -162,7 +162,7 @@ final class IslandEvent {
                 sbn.getKey(),
                 pkg,
                 label,
-                iconOf(context, notification),
+                iconOf(context, notification, pkg),
                 title,
                 text,
                 notification.contentIntent,
@@ -369,16 +369,79 @@ final class IslandEvent {
         }
     }
 
-    private static Bitmap iconOf(Context context, Notification notification) {
+    /**
+     * The picture a card shows, chosen the way a user reads a notification.
+     *
+     * <p>First the image the posting app attached, which is the contact's photo for WeChat, QQ and
+     * anything else that talks to people; then the avatar inside a messaging-style notification; then
+     * the app's own launcher icon in colour; and only then the small icon, which is monochrome on
+     * modern Android but at least identifies the app.
+     */
+    private static Bitmap iconOf(Context context, Notification notification, String pkg) {
         Bitmap large = toBitmap(notification.getLargeIcon() == null
                 ? null
                 : notification.getLargeIcon().loadDrawable(context), ICON_PX);
         if (large != null) {
             return large;
         }
+        Bitmap person = personIcon(context, notification);
+        if (person != null) {
+            return person;
+        }
+        try {
+            Bitmap app = toBitmap(context.getPackageManager().getApplicationIcon(pkg), ICON_PX);
+            if (app != null) {
+                return app;
+            }
+        } catch (Throwable ignored) {
+            // A package without a readable icon falls through to the small one.
+        }
         return toBitmap(notification.getSmallIcon() == null
                 ? null
                 : notification.getSmallIcon().loadDrawable(context), ICON_PX);
+    }
+
+    /** The sender avatar from a messaging-style notification, or null when there is none. */
+    private static Bitmap personIcon(Context context, Notification notification) {
+        try {
+            Bundle extras = notification.extras;
+            if (android.os.Build.VERSION.SDK_INT < 28) {
+                // Person only exists from Android 9, and nothing older can put one in the bundle.
+                return null;
+            }
+            if (extras == null) {
+                return null;
+            }
+            java.util.ArrayList<android.app.Person> people =
+                    extras.getParcelableArrayList(Notification.EXTRA_PEOPLE_LIST);
+            if (people == null) {
+                return null;
+            }
+            for (android.app.Person person : people) {
+                if (person == null) {
+                    continue;
+                }
+                Uri uri = person.getIconUri();
+                if (uri == null) {
+                    continue;
+                }
+                java.io.InputStream in = context.getContentResolver().openInputStream(uri);
+                if (in == null) {
+                    continue;
+                }
+                try {
+                    Bitmap bitmap = android.graphics.BitmapFactory.decodeStream(in);
+                    if (bitmap != null) {
+                        return scaleIcon(bitmap);
+                    }
+                } finally {
+                    in.close();
+                }
+            }
+        } catch (Throwable ignored) {
+            // Content URIs from another process can be revoked; the app icon is the fallback.
+        }
+        return null;
     }
 
     private static Bitmap toBitmap(Drawable drawable, int size) {

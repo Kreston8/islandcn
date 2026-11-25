@@ -34,10 +34,14 @@ final class Prefs {
     static final String KEY_STANDBY = "on_standby";
     static final String KEY_STANDBY_WEATHER = "sb_weather";
     static final String KEY_STANDBY_PUPPY = "sb_puppy";
+    static final String KEY_STANDBY_AQI = "sb_aqi";
     static final String KEY_STANDBY_QUOTE = "sb_quote";
     static final String KEY_STANDBY_ORDER = "sb_order";
     /** City name typed by the user; the only reason the weather request is ever made. */
     static final String KEY_CITY = "weather_city";
+
+    /** The order a fresh install starts with, and the source of every known item. */
+    private static final String[] ORDER_DEFAULT = {"weather", "aqi", "puppy", "quote"};
 
     private Prefs() {
     }
@@ -162,21 +166,28 @@ final class Prefs {
         }
     }
 
-    /** The standby order as written by the settings screen, e.g. {@code "puppy,weather,quote"}. */
+    /**
+     * The standby order as written by the settings screen, e.g. {@code "puppy,weather,quote"}.
+     *
+     * <p>Items that a later version added are appended rather than dropped, so an install that
+     * predates the air-quality chip keeps its old order and gains the new item at the end.
+     */
     static String[] order(Context context) {
+        java.util.List<String> items = new java.util.ArrayList<String>();
         String raw = text(context, KEY_STANDBY_ORDER);
-        if (raw.isEmpty()) {
-            return new String[]{"weather", "puppy", "quote"};
-        }
-        String[] parts = raw.split(",");
-        int count = 0;
-        for (String part : parts) {
-            if (part != null && !part.trim().isEmpty()) {
-                parts[count++] = part.trim();
+        if (!raw.isEmpty()) {
+            for (String part : raw.split(",")) {
+                String item = part == null ? "" : part.trim();
+                if (!item.isEmpty() && !items.contains(item)) {
+                    items.add(item);
+                }
             }
         }
-        String[] clean = new String[count];
-        System.arraycopy(parts, 0, clean, 0, count);
-        return count == 0 ? new String[]{"weather", "puppy", "quote"} : clean;
+        for (String item : ORDER_DEFAULT) {
+            if (!items.contains(item)) {
+                items.add(item);
+            }
+        }
+        return items.toArray(new String[0]);
     }
 }

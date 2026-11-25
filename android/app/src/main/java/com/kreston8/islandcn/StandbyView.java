@@ -15,7 +15,6 @@ import android.os.Looper;
 import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
-import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
@@ -35,22 +34,20 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * The always-on pill on the launcher: temperature, the golden-retriever head, one line of the day.
+ * The always-on pill on the launcher: weather, air quality, the mascot and one line of the day.
  *
  * <p>It is a second overlay window rather than a card, because it has to appear when nothing else
- * is happening and disappear the moment a real card or another app shows up; the service decides
- * that and only asks this view to rebuild its contents.
+ * is happening and disappear the moment another app shows up; the service decides that and only
+ * asks this view to rebuild its contents. The service also alternates this pill with a notification
+ * card, which is why visibility is never set from here.
  *
- * <p>Both extras it needs are honest about their limits: the temperature comes from a public
- * endpoint and only after the user typed a city, and the dog is a bundled vector that sways a few
- * degrees either way so it reads as alive without costing a frame budget.
+ * <p>Both online extras are honest about their limits: temperature and air quality come from public
+ * endpoints and only after the user typed a city, so an empty city keeps the app offline.
  */
 final class StandbyView extends FrameLayout {
 
     private static final int H_DP = 44;
     private static final float R_DP = 22f;
-    private static final long SWAY_MS = 900L;
-    private static final float SWAY_DEG = 7f;
     private static final int GAP_DP = 8;
 
     private final LinearLayout row;
@@ -58,20 +55,7 @@ final class StandbyView extends FrameLayout {
 
     private String signature = "";
     private boolean hasContent;
-    private ImageView puppy;
-
-    /** Reverses the sway forever; a linear track keeps it calm instead of cartoonish. */
-    private final Runnable sway = new Runnable() {
-        @Override
-        public void run() {
-            if (puppy == null) {
-                return;
-            }
-            float target = puppy.getRotation() > 0f ? -SWAY_DEG : SWAY_DEG;
-            puppy.animate().rotation(target).setDuration(SWAY_MS)
-                    .setInterpolator(new LinearInterpolator()).withEndAction(sway).start();
-        }
-    };
+    private DaozaiView face;
 
     StandbyView(Context context) {
         super(context);
@@ -92,59 +76,77 @@ final class StandbyView extends FrameLayout {
         setVisibility(View.INVISIBLE);
     }
 
+    boolean hasContent() {
+        return hasContent;
+    }
+
     /**
      * Rebuilds the pill from the stored order and switches.
      *
      * <p>Called on a timer, so the children are only replaced when something actually changed;
-     * otherwise the dog would restart its sway four times a minute.
+     * otherwise the mascot would restart its blink cycle four times a minute.
      *
      * @return true when at least one item is switched on and ready to draw.
      */
     boolean refresh() {
         Context context = getContext();
         String[] order = Prefs.order(context);
-        String temperature = Prefs.get(context, Prefs.KEY_STANDBY_WEATHER)
-                ? Weather.temperature(context, Prefs.text(context, Prefs.KEY_CITY), this::onWeather)
-                : null;
-        boolean puppyOn = Prefs.get(context, Prefs.KEY_STANDBY_PUPPY);
+        boolean weatherOn = Prefs.get(context, Prefs.KEY_STANDBY_WEATHER);
+        boolean aqiOn = Prefs.get(context, Prefs.KEY_STANDBY_AQI);
+        boolean faceOn = Prefs.get(context, Prefs.KEY_STANDBY_PUPPY);
         boolean quoteOn = Prefs.get(context, Prefs.KEY_STANDBY_QUOTE);
+
+        String temperature = null;
+        String air = null;
+        int code = -1;
+        if (weatherOn || aqiOn) {
+            Weather.Reading reading =
+                    Weather.snapshot(context, Prefs.text(context, Prefs.KEY_CITY), this::onWeather);
+            if (reading != null) {
+                temperature = reading.temp;
+                code = reading.code;
+                air = reading.aqi;
+            }
+        }
         String quote = quoteOn ? quote(context) : "";
-        String next = String.join("|", order)
-                + "#" + temperature + "#" + puppyOn + "#" + quoteOn + "#" + quote;
+        String next = String.join("|", order) + "#" + temperature + "#" + code + "#" + air
+                + "#" + faceOn + "#" + quoteOn + "#" + quote;
         if (next.equals(signature)) {
             return hasContent;
         }
         signature = next;
 
-        if (puppy != null) {
-            puppy.animate().cancel();
-            puppy = null;
-        }
+        face = null;
         row.removeAllViews();
         int count = 0;
         for (String item : order) {
             if ("weather".equals(item)) {
-                if (temperature == null) {
+                if (!weatherOn || temperature == null) {
                     continue;
                 }
-                row.addView(label(temperature, Color.WHITE, 14f, true), margin());
+                row.addView(weatherIcon(code, temperature));
+                count++;
+            } else if ("aqi".equals(item)) {
+                if (!aqiOn || air == null || air.isEmpty()) {
+                    continue;
+                }
+                TextView badge = label("AQI " + air, aqiColor(air), 12.5f, true);
+                row.addView(badge, margin());
                 count++;
             } else if ("puppy".equals(item)) {
-                if (!puppyOn) {
+                if (!faceOn) {
                     continue;
                 }
-                puppy = new ImageView(context);
-                puppy.setImageResource(R.drawable.ic_puppy);
-                puppy.setScaleType(ImageView.ScaleType.FIT_CENTER);
-                row.addView(puppy, fixed(dp(22), dp(22)));
-                puppy.post(sway);
+                face = new DaozaiView(context);
+                row.addView(face, fixed(dp(24), dp(24)));
+                face.animate(getVisibility() == View.VISIBLE && isShown());
                 count++;
             } else if ("quote".equals(item)) {
                 if (!quoteOn || quote.isEmpty()) {
                     continue;
                 }
-                TextView line = label(quote, 0xFFB9B9C2, 11f, false);
-                line.setMaxWidth(dp(190));
+                TextView line = label(quote, 0xFFC6C6CE, 12.5f, false);
+                line.setMaxWidth(dp(230));
                 line.setSingleLine(true);
                 line.setEllipsize(TextUtils.TruncateAt.END);
                 row.addView(line, margin());
@@ -155,13 +157,38 @@ final class StandbyView extends FrameLayout {
         return hasContent;
     }
 
+    /** A weather glyph plus the degree reading, sized to sit inside the 44 dp pill. */
+    private LinearLayout weatherIcon(int code, String temperature) {
+        LinearLayout box = new LinearLayout(getContext());
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        box.setPadding(0, 0, 0, 0);
+
+        ImageView glyph = new ImageView(getContext());
+        glyph.setImageResource(iconFor(code));
+        glyph.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        box.addView(glyph, new LinearLayout.LayoutParams(dp(18), dp(18)));
+
+        TextView degrees = label(temperature, Color.WHITE, 15f, true);
+        LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+        params.leftMargin = dp(4);
+        box.addView(degrees, params);
+        return box;
+    }
+
     /** Stops the animation when the pill is hidden, so a hidden window costs nothing. */
     void pause() {
-        if (puppy != null) {
-            puppy.animate().cancel();
+        if (face != null) {
+            face.animate(false);
         }
-        // Force a rebuild on the next show, which restarts the sway from the middle.
-        signature = "";
+    }
+
+    /** Restarts the mascot after the pill came back from being covered. */
+    void resume() {
+        if (face != null) {
+            face.animate(true);
+        }
     }
 
     private void onWeather() {
@@ -172,9 +199,7 @@ final class StandbyView extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
-        if (puppy != null) {
-            puppy.animate().cancel();
-        }
+        pause();
         super.onDetachedFromWindow();
     }
 
@@ -224,16 +249,51 @@ final class StandbyView extends FrameLayout {
         }
     }
 
+    /** WMO weather code to a glyph: clear, cloudy, wet, frozen. */
+    private static int iconFor(int code) {
+        if (code >= 0 && code <= 1) {
+            return R.drawable.ic_wx_sun;
+        }
+        if (code >= 71 && code <= 77 || code == 85 || code == 86) {
+            return R.drawable.ic_wx_snow;
+        }
+        if (code >= 51 && code <= 67 || code >= 80 && code <= 82 || code >= 95) {
+            return R.drawable.ic_wx_rain;
+        }
+        return R.drawable.ic_wx_cloud;
+    }
+
+    /** US AQI bands, the same green/amber/orange/red a weather app would show. */
+    private static int aqiColor(String value) {
+        int level;
+        try {
+            level = Integer.parseInt(value.trim());
+        } catch (Throwable ignored) {
+            return 0xFFC6C6CE;
+        }
+        if (level <= 50) {
+            return 0xFF6FCF97;
+        }
+        if (level <= 100) {
+            return 0xFFF2C94C;
+        }
+        if (level <= 150) {
+            return 0xFFF2994A;
+        }
+        return 0xFFEB5757;
+    }
+
     private int dp(float value) {
         return Math.round(value * density);
     }
 
     /**
-     * Current temperature for a city name, or null while unknown.
+     * Current weather and air quality for a city name, or null while unknown.
      *
-     * <p>Two requests: the name is turned into coordinates, then the forecast is read. The result is
-     * kept for half an hour, which is far cheaper than polling and still looks live. Nothing is ever
-     * requested without a city, so leaving the field empty keeps the app completely offline.
+     * <p>Three requests, two hosts: the name becomes coordinates, the forecast gives the temperature
+     * and the weather code, and the air-quality endpoint gives the US AQI. All three are cached for
+     * half an hour, which is far cheaper than polling and still looks live. Nothing is ever requested
+     * without a city, so leaving the field empty keeps the app completely offline.
      */
     static final class Weather {
 
@@ -242,14 +302,26 @@ final class StandbyView extends FrameLayout {
         private static final int MAX_BYTES = 64 * 1024;
 
         private static String city = "";
-        private static String text;
+        private static Reading cache;
         private static long at;
         private static boolean busy;
 
         private Weather() {
         }
 
-        static String temperature(Context context, String name, Runnable done) {
+        static final class Reading {
+            final String temp;
+            final int code;
+            final String aqi;
+
+            Reading(String temp, int code, String aqi) {
+                this.temp = temp;
+                this.code = code;
+                this.aqi = aqi;
+            }
+        }
+
+        static Reading snapshot(Context context, String name, Runnable done) {
             if (name == null || name.trim().isEmpty()) {
                 return null;
             }
@@ -257,14 +329,14 @@ final class StandbyView extends FrameLayout {
             if (!wanted.equals(city)) {
                 // A different city invalidates the old reading instead of showing it for a while.
                 city = wanted;
-                text = null;
+                cache = null;
                 at = 0L;
             }
-            if (text != null && System.currentTimeMillis() - at < TTL_MS) {
-                return text;
+            if (cache != null && System.currentTimeMillis() - at < TTL_MS) {
+                return cache;
             }
             fetch(context, wanted, done);
-            return text;
+            return cache;
         }
 
         private static void fetch(final Context context, final String wanted, final Runnable done) {
@@ -272,19 +344,18 @@ final class StandbyView extends FrameLayout {
                 return;
             }
             busy = true;
-            final Context app = context.getApplicationContext();
             Thread worker = new Thread(() -> {
-                String value = null;
+                Reading value = null;
                 try {
                     value = request(wanted);
                 } catch (Throwable ignored) {
-                    // Offline, blocked, or the endpoint changed shape: the item just stays hidden.
+                    // Offline, blocked, or the endpoint changed shape: the items just stay hidden.
                 }
-                final String result = value;
+                final Reading result = value;
                 busy = false;
                 new Handler(Looper.getMainLooper()).post(() -> {
                     if (result != null && wanted.equals(city)) {
-                        text = result;
+                        cache = result;
                         at = System.currentTimeMillis();
                     }
                     if (done != null) {
@@ -296,7 +367,7 @@ final class StandbyView extends FrameLayout {
             worker.start();
         }
 
-        private static String request(String name) {
+        private static Reading request(String name) {
             JSONObject found;
             try {
                 found = new JSONObject(read(
@@ -318,19 +389,39 @@ final class StandbyView extends FrameLayout {
             if (Double.isNaN(latitude) || Double.isNaN(longitude)) {
                 return null;
             }
-            JSONObject forecast;
+
+            String temperature = null;
+            int code = -1;
             try {
-                forecast = new JSONObject(read(
-                        "https://api.open-meteo.com/v1/forecast?current=temperature_2m&latitude="
-                                + latitude + "&longitude=" + longitude));
-            } catch (Exception failure) {
+                JSONObject forecast = new JSONObject(read(
+                        "https://api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code"
+                                + "&latitude=" + latitude + "&longitude=" + longitude));
+                JSONObject current = forecast.optJSONObject("current");
+                if (current != null && current.has("temperature_2m")) {
+                    temperature = Math.round(current.optDouble("temperature_2m", 0d)) + "\u00b0";
+                    code = current.optInt("weather_code", -1);
+                }
+            } catch (Exception ignored) {
+                // The temperature is optional; the air quality below can still succeed.
+            }
+
+            String air = null;
+            try {
+                JSONObject quality = new JSONObject(read(
+                        "https://air-quality-api.open-meteo.com/v1/air-quality?current=us_aqi"
+                                + "&latitude=" + latitude + "&longitude=" + longitude));
+                JSONObject current = quality.optJSONObject("current");
+                if (current != null && current.has("us_aqi")) {
+                    air = String.valueOf(Math.round(current.optDouble("us_aqi", 0d)));
+                }
+            } catch (Exception ignored) {
+                // Same here: a missing AQI only hides one chip.
+            }
+
+            if (temperature == null && air == null) {
                 return null;
             }
-            JSONObject current = forecast.optJSONObject("current");
-            if (current == null || !current.has("temperature_2m")) {
-                return null;
-            }
-            return Math.round(current.optDouble("temperature_2m", 0d)) + "\u00b0";
+            return new Reading(temperature, code, air);
         }
 
         private static String read(String address) throws Exception {
@@ -368,37 +459,52 @@ final class StandbyView extends FrameLayout {
     /**
      * True when the launcher is the app in front.
      *
-     * <p>Without {@code PACKAGE_USAGE_STATS} the answer is unknown, which is reported as false: the
-     * standby pill then never appears, which is better than appearing over a video.
+     * <p>Usage events only say what happened, so an empty window must not be read as "another app is
+     * in front": that is what used to hide the pill a few seconds after it appeared. The last answer
+     * is kept and only a newer event can change it; before anything is known the answer is true,
+     * because an overlay pill over the launcher is the normal state.
+     *
+     * <p>Without {@code PACKAGE_USAGE_STATS} the answer stays at that default, which the service
+     * turns into "no pill at all" before asking here.
      */
     static boolean homeInFront(Context context) {
         try {
             UsageStatsManager manager =
                     (UsageStatsManager) context.getSystemService(Context.USAGE_STATS_SERVICE);
             if (manager == null) {
-                return false;
+                return homeState == null || homeState;
             }
             Set<String> homes = homePackages(context);
             if (homes.isEmpty()) {
-                return false;
+                return homeState == null || homeState;
             }
             long now = System.currentTimeMillis();
-            UsageEvents events = manager.queryEvents(now - 8000L, now);
-            if (events == null) {
-                return false;
-            }
-            UsageEvents.Event event = new UsageEvents.Event();
-            String last = null;
-            while (events.getNextEvent(event)) {
-                if (event.getEventType() == UsageEvents.Event.ACTIVITY_RESUMED) {
-                    last = event.getPackageName();
+            long since = homeCheckedAt > 0L ? Math.max(homeCheckedAt - 2000L, now - 60000L)
+                    : now - 60000L;
+            homeCheckedAt = now;
+            UsageEvents events = manager.queryEvents(since, now);
+            if (events != null) {
+                UsageEvents.Event event = new UsageEvents.Event();
+                while (events.getNextEvent(event)) {
+                    if (event.getEventType() != UsageEvents.Event.ACTIVITY_RESUMED) {
+                        continue;
+                    }
+                    String pkg = event.getPackageName();
+                    if (pkg == null || pkg.equals(context.getPackageName())) {
+                        continue;
+                    }
+                    homeState = homes.contains(pkg);
                 }
             }
-            return last != null && homes.contains(last);
+            return homeState == null || homeState;
         } catch (Throwable ignored) {
-            return false;
+            return homeState == null || homeState;
         }
     }
+
+    /** Last answer about the launcher, kept across polls so a quiet window changes nothing. */
+    private static Boolean homeState;
+    private static long homeCheckedAt;
 
     private static Set<String> homePackages(Context context) {
         Set<String> homes = new HashSet<>();

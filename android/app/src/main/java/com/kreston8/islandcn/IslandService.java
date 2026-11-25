@@ -18,6 +18,7 @@ import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -38,6 +39,11 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private static final String CHANNEL_ID = "island_status";
     private static final int NOTIFICATION_ID = 42;
     private static final long AUTO_COLLAPSE_MS = 4200L;
+
+    /** The notification card and the standby pill take turns for as long as both are available. */
+    private static final long FLIP_MS = 3000L;
+    /** How long one notification may interrupt a lyric line before the line comes back. */
+    private static final long NOTIFY_HOLD_MS = 3000L;
 
     private static volatile boolean running;
 
@@ -71,8 +77,46 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
     };
 
+    /**
+     * Ticks the 3 s rotation between the notification card and the standby pill, and hands the pill
+     * back to the lyric line once a notification interruption has had its turn.
+     */
+    private final Runnable flipTask = new Runnable() {
+        @Override
+        public void run() {
+            boolean expired = notifyHoldUntil > 0L
+                    && notifyHoldUntil <= SystemClock.elapsedRealtime();
+            if (expired) {
+                notifyHoldUntil = 0L;
+            }
+            boolean rotating = notifyCard != null && musicCard == null && standbyHas
+                    && Prefs.opt(IslandService.this, Prefs.KEY_STANDBY);
+            if (rotating) {
+                notifyShowing = !notifyShowing;
+            } else if (notifyCard != null) {
+                notifyShowing = true;
+            }
+            if (expired || rotating) {
+                applyPhase();
+            }
+            handler.postDelayed(this, FLIP_MS);
+        }
+    };
+
     private IslandEvent current;
     private String currentKey;
+    /** Latest non-music card: it takes turns with the standby pill. */
+    private IslandEvent notifyCard;
+    /** Latest music card: it owns the pill until the track stops. */
+    private IslandEvent musicCard;
+    private long musicPos;
+    private long musicAt;
+    /** True while the notification card holds the pill, which drives the rotation. */
+    private boolean notifyShowing;
+    /** Moment the lyric line may take the pill back after a notification cut in. */
+    private long notifyHoldUntil;
+    private boolean standbyHas;
+    private boolean standbyHome;
 
     static boolean isRunning() {
         return running;
@@ -111,6 +155,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     }
 
     @Override
+
     public void onIslandEvent(IslandEvent event) {
         if (event == null) {
             return;
@@ -118,41 +163,65 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         if (!Prefs.enabled(this, event.kind)) {
             return;
         }
-        event.bt(btChips());
-        hideStandby();
+        event.bt(chipsFor(event.kind));
         if (island == null) {
             attachOverlay();
         }
         if (island == null) {
             return;
         }
-        boolean sameCard = current != null && event.key.equals(current.key) && island.isExpanded();
-        current = event;
-        currentKey = event.key;
-        island.bind(event);
-        island.setVisibility(View.VISIBLE);
-        if (!sameCard) {
-            // Re-binding the card already on screen (a lyric arriving late) must not reopen it.
-            island.setExpanded(true, true);
+        long now = SystemClock.elapsedRealtime();
+        if (event.kind == IslandEvent.KIND_MUSIC) {
+            // A playing track holds the pill; only its clock is remembered for a later resume.
+            musicCard = event;
+            musicPos = event.position;
+            musicAt = now;
+            notifyHoldUntil = 0L;
+            notifyShowing = false;
+            applyPhase();
+            return;
         }
+        notifyCard = event;
+        notifyShowing = true;
+        if (musicCard != null) {
+            notifyHoldUntil = now + NOTIFY_HOLD_MS;
+        }
+        applyPhase();
         handler.removeCallbacks(collapseTask);
-        if (event.kind != IslandEvent.KIND_MUSIC) {
-            // The music card stays open, otherwise the karaoke line would stop updating.
+        if (musicCard == null && !(standbyHas && Prefs.opt(this, Prefs.KEY_STANDBY))) {
+            // With no standby pill to rotate with, the card folds back on its own as before.
             handler.postDelayed(collapseTask, AUTO_COLLAPSE_MS);
         }
     }
 
     @Override
     public void onIslandRemoved(String key) {
-        if (key == null || !key.equals(currentKey)) {
+        if (key == null) {
             return;
         }
-        hideIsland();
+        if (key.startsWith(MUSIC_KEY)) {
+            musicCard = null;
+            notifyHoldUntil = 0L;
+        }
+        if (notifyCard != null && key.equals(notifyCard.key)) {
+            notifyCard = null;
+        }
+        if (key.equals(currentKey)) {
+            current = null;
+            currentKey = null;
+            if (island != null) {
+                island.stopTicker();
+                island.setVisibility(View.INVISIBLE);
+            }
+        }
+        notifyShowing = notifyCard != null;
+        applyPhase();
     }
 
     @Override
     public void onDestroy() {
         handler.removeCallbacks(collapseTask);
+        handler.removeCallbacks(flipTask);
         IslandBridge.detach(this);
         running = false;
         if (island != null && windowManager != null) {
@@ -209,7 +278,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
                 | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
         params.format = PixelFormat.TRANSLUCENT;
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.y = statusBarHeight() + dp(4);
+        params.y = Math.max(0, statusBarHeight() - dp(2));
         params.setTitle(getString(R.string.app_name));
 
         try {
@@ -258,9 +327,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             // Nothing scheduled, or the clock service is unavailable.
         }
 
-        // Battery chips are only read when the switch is on; nothing polls while it is off.
+        // The receiver is passive, so it stays registered even while the chips are switched off.
         startBt();
-
         // The music watcher is the only part that polls, so it is skipped entirely when off.
         if (!Prefs.enabled(this, IslandEvent.KIND_MUSIC)) {
             return;
@@ -320,7 +388,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
                 | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED;
         params.format = PixelFormat.TRANSLUCENT;
         params.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-        params.y = statusBarHeight() + dp(4);
+        params.y = Math.max(0, statusBarHeight() - dp(2));
         params.setTitle(getString(R.string.standby_order_title));
         try {
             windowManager.addView(view, params);
@@ -332,47 +400,56 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     }
 
     /**
-     * Shows the standby pill only when it cannot fight with anything else on screen: the feature is
-     * on, no card is up, and the launcher is the app in front.
+     * Refreshes the standby pill and tells the phase machine whether it has anything to show.
      *
      * <p>The check runs on a timer instead of watching for changes because "the launcher is in
      * front" is only knowable from usage events, which have to be polled anyway.
      */
     private void updateStandby() {
-        if (!Prefs.opt(this, Prefs.KEY_STANDBY) || current != null) {
-            hideStandby();
-            return;
+        boolean on = Prefs.opt(this, Prefs.KEY_STANDBY);
+        boolean home = on && Perms.hasUsageAccess(this) && StandbyView.homeInFront(this);
+        boolean has = false;
+        if (home && attachStandby()) {
+            try {
+                has = standby.refresh();
+            } catch (Throwable ignored) {
+                has = standby.hasContent();
+            }
         }
-        if (!Perms.hasUsageAccess(this) || !StandbyView.homeInFront(this)) {
-            hideStandby();
-            return;
-        }
-        if (!attachStandby()) {
-            return;
-        }
-        standby.setVisibility(standby.refresh() ? View.VISIBLE : View.INVISIBLE);
-    }
-
-    private void hideStandby() {
-        if (standby != null) {
-            standby.setVisibility(View.INVISIBLE);
-            standby.pause();
-        }
+        standbyHome = home;
+        standbyHas = has;
+        applyPhase();
     }
 
     private void startStandby() {
         handler.removeCallbacks(standbyTask);
         handler.post(standbyTask);
+        handler.removeCallbacks(flipTask);
+        handler.postDelayed(flipTask, FLIP_MS);
     }
 
     private void stopStandby() {
         handler.removeCallbacks(standbyTask);
-        hideStandby();
+        handler.removeCallbacks(flipTask);
+        if (standby != null) {
+            standby.pause();
+        }
     }
 
-    /** Opened, closed and reopened from the settings screen without restarting the service. */
-    private java.util.List<IslandEvent.Bt> btChips() {
-        if (!Prefs.opt(this, Prefs.KEY_BT) || btWatcher == null) {
+    /**
+     * Battery chips for the card about to be drawn.
+     *
+     * <p>The switch normally gates them, but a lyric line always carries them: seeing the headset
+     * level without hunting for a setting is the point of the feature.
+     */
+    private java.util.List<IslandEvent.Bt> chipsFor(int kind) {
+        if (kind != IslandEvent.KIND_MUSIC && !Prefs.opt(this, Prefs.KEY_BT)) {
+            return null;
+        }
+        if (btWatcher == null) {
+            startBt();
+        }
+        if (btWatcher == null) {
             return null;
         }
         try {
@@ -382,15 +459,25 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
     }
 
+    /**
+     * Registers the battery receiver.
+     *
+     * <p>It only listens: the accessory pushes levels on its own, so this costs nothing while the
+     * chips stay hidden.
+     */
     private void startBt() {
-        if (!Prefs.opt(this, Prefs.KEY_BT) || btRegistered) {
+        if (btRegistered) {
             return;
         }
         if (btWatcher == null) {
             btWatcher = new BtWatcher();
         }
-        btWatcher.start(this);
-        btRegistered = true;
+        try {
+            btWatcher.start(this);
+            btRegistered = true;
+        } catch (Throwable ignored) {
+            // Without BLUETOOTH_CONNECT there is nothing to read, so no chips ever appear.
+        }
     }
 
     private void openCurrent() {
@@ -451,17 +538,112 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private void dismissCurrent() {
         handler.removeCallbacks(collapseTask);
         IslandBridge.cancel(currentKey);
+        // Closing the card by hand drops just that card: the standby pill is left alone, and the
+        // track only comes back when it actually updates again.
+        if (current != null && current.kind == IslandEvent.KIND_MUSIC) {
+            musicCard = null;
+        } else {
+            notifyCard = null;
+        }
         hideIsland();
     }
 
+    /** Removes every card from the pill, then lets the phase machine pick what is left. */
     private void hideIsland() {
         handler.removeCallbacks(collapseTask);
+        notifyCard = null;
+        notifyHoldUntil = 0L;
+        notifyShowing = false;
         current = null;
         currentKey = null;
         if (island != null) {
             island.stopTicker();
             island.setVisibility(View.INVISIBLE);
         }
+        applyPhase();
+    }
+
+    /**
+     * Puts one card on the pill.
+     *
+     * <p>A card already on screen is left alone: re-binding it would restart the expand animation
+     * and the karaoke line for nothing.
+     */
+    private void show(IslandEvent event) {
+        if (island == null) {
+            return;
+        }
+        if (current == event && island.getVisibility() == View.VISIBLE && island.isExpanded()) {
+            return;
+        }
+        boolean sameCard = current != null && event.key != null && event.key.equals(current.key)
+                && island.isExpanded();
+        if (event == musicCard) {
+            // The track kept playing while the card was away, so move its clock forward.
+            event.position = musicPos + (SystemClock.elapsedRealtime() - musicAt);
+        }
+        current = event;
+        currentKey = event.key;
+        if (island.getVisibility() != View.VISIBLE) {
+            island.setVisibility(View.VISIBLE);
+        }
+        island.bind(event);
+        if (!sameCard) {
+            island.setExpanded(true, true);
+        }
+    }
+
+    /**
+     * Decides which window is on screen.
+     *
+     * <p>A playing track owns the pill: it yields only for one short notification interruption
+     * ({@link #NOTIFY_HOLD_MS}) and then takes the lyric line back where it should be by now.
+     * Without music the notification card and the standby pill take turns every {@link #FLIP_MS},
+     * and once the notification is closed by hand only the standby pill is left.
+     */
+    private void applyPhase() {
+        IslandEvent target = null;
+        boolean rotate = false;
+        if (musicCard != null) {
+            target = notifyHoldUntil > SystemClock.elapsedRealtime() && notifyCard != null
+                    ? notifyCard
+                    : musicCard;
+        } else if (notifyCard != null) {
+            rotate = standbyHas && Prefs.opt(this, Prefs.KEY_STANDBY);
+            if (!rotate || notifyShowing) {
+                target = notifyCard;
+            }
+        }
+        if (target == null) {
+            if (island != null) {
+                island.stopTicker();
+                island.setVisibility(View.INVISIBLE);
+            }
+        } else {
+            show(target);
+        }
+        applyStandbyVisibility();
+    }
+
+    /**
+     * The standby pill gives way to every card, but it is the only thing left once nothing else is
+     * showing, which is what makes the 3 s rotation visible.
+     */
+    private void applyStandbyVisibility() {
+        boolean show = Prefs.opt(this, Prefs.KEY_STANDBY) && standbyHas && standbyHome
+                && musicCard == null && (notifyCard == null || !notifyShowing);
+        if (!show) {
+            if (standby != null) {
+                standby.pause();
+                standby.setVisibility(View.INVISIBLE);
+            }
+            return;
+        }
+        if (!attachStandby()) {
+            return;
+        }
+        standby.setVisibility(standby.hasContent() ? View.VISIBLE : View.INVISIBLE);
+        standby.resume();
     }
 
     private void startInForeground() {
