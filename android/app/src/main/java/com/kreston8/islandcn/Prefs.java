@@ -28,7 +28,7 @@ final class Prefs {
     static final String KEY_LYRICS = "on_lyrics";
     static final String KEY_ALARM_SHOWN = "alarm_shown";
 
-    /** Bluetooth battery chips: off by default, each one widens the pill. */
+    /** Bluetooth battery chips: on by default, and each accessory has its own switch below it. */
     static final String KEY_BT = "on_bt";
     /** Desktop standby island and its three selectable items (items default to on). */
     static final String KEY_STANDBY = "on_standby";
@@ -36,6 +36,7 @@ final class Prefs {
     static final String KEY_STANDBY_PUPPY = "sb_puppy";
     static final String KEY_STANDBY_AQI = "sb_aqi";
     static final String KEY_STANDBY_QUOTE = "sb_quote";
+    static final String KEY_STANDBY_BT = "sb_bt";
     static final String KEY_STANDBY_ORDER = "sb_order";
     /** City name typed by the user; the only reason the weather request is ever made. */
     static final String KEY_CITY = "weather_city";
@@ -47,9 +48,21 @@ final class Prefs {
     static final String KEY_NOTIFY_ONLY = "on_only";
     static final String KEY_NOTIFY_WECHAT = "on_wechat";
     static final String KEY_NOTIFY_PICKUP = "on_pickup";
+    /** QQ: the third per-source switch, on by default like the other two. */
+    static final String KEY_NOTIFY_QQ = "on_qq";
+    /**
+     * One switch per delivery platform, shown under the 外卖进度 master. All four start on, so the
+     * master alone decides until a single platform proves noisy.
+     */
+    static final String KEY_DELIVERY_MEITUAN = "dl_meituan";
+    static final String KEY_DELIVERY_SHANGOU = "dl_shangou";
+    static final String KEY_DELIVERY_JD = "dl_jd";
+    static final String KEY_DELIVERY_QIXIAN = "dl_qixian";
+    /** Prefix for the per-accessory switch; the device address is appended to it. */
+    static final String KEY_BT_DEVICE = "bt_ok:";
 
     /** The order a fresh install starts with, and the source of every known item. */
-    private static final String[] ORDER_DEFAULT = {"weather", "aqi", "puppy", "quote"};
+    private static final String[] ORDER_DEFAULT = {"weather", "aqi", "puppy", "quote", "bt"};
 
     private Prefs() {
     }
@@ -80,7 +93,7 @@ final class Prefs {
             case IslandEvent.KIND_OTP:
                 return get(context, KEY_OTP);
             case IslandEvent.KIND_PICKUP:
-                return get(context, KEY_PICKUP);
+                return get(context, KEY_NOTIFY_PICKUP);
             case IslandEvent.KIND_DELIVERY:
                 return get(context, KEY_DELIVERY);
             case IslandEvent.KIND_TODO:

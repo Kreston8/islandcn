@@ -32,6 +32,7 @@ import java.net.URL;
 import java.net.URLEncoder;
 import java.util.Calendar;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -47,8 +48,8 @@ import java.util.Set;
  */
 final class StandbyView extends FrameLayout {
 
-    private static final int H_DP = 44;
-    private static final float R_DP = 22f;
+    private static final int H_DP = 50;
+    private static final float R_DP = 25f;
     private static final int GAP_DP = 8;
 
     private final LinearLayout row;
@@ -96,6 +97,27 @@ final class StandbyView extends FrameLayout {
         boolean aqiOn = Prefs.get(context, Prefs.KEY_STANDBY_AQI);
         boolean faceOn = Prefs.get(context, Prefs.KEY_STANDBY_PUPPY);
         boolean quoteOn = Prefs.get(context, Prefs.KEY_STANDBY_QUOTE);
+        boolean btOn = Prefs.get(context, Prefs.KEY_STANDBY_BT);
+        // Read once per rebuild: peek() reflects into the platform for every accessory, and the pill
+        // is rebuilt every four seconds.
+        java.util.List<IslandEvent.Bt> devices = null;
+        if (btOn) {
+            try {
+                devices = BtWatcher.peek(context);
+            } catch (Throwable failure) {
+                devices = null;
+            }
+        }
+        String deviceSignature = "";
+        if (devices != null) {
+            StringBuilder builder = new StringBuilder();
+            for (IslandEvent.Bt device : devices) {
+                if (device != null) {
+                    builder.append(device.name).append('/').append(device.level).append(';');
+                }
+            }
+            deviceSignature = builder.toString();
+        }
 
         String temperature = null;
         String air = null;
@@ -111,7 +133,7 @@ final class StandbyView extends FrameLayout {
         }
         String quote = quoteOn ? quote(context) : "";
         String next = String.join("|", order) + "#" + temperature + "#" + code + "#" + air
-                + "#" + faceOn + "#" + quoteOn + "#" + quote;
+                + "#" + faceOn + "#" + quoteOn + "#" + quote + "#" + btOn + "#" + deviceSignature;
         if (next.equals(signature)) {
             return hasContent;
         }
@@ -138,19 +160,30 @@ final class StandbyView extends FrameLayout {
                 if (!faceOn) {
                     continue;
                 }
+                // 32 dp against a 50 dp pill: the eyes have to read as eyes at arm's length.
                 face = new DaozaiView(context);
-                row.addView(face, fixed(dp(24), dp(24)));
+                row.addView(face, fixed(dp(32), dp(32)));
                 face.animate(getVisibility() == View.VISIBLE && isShown());
                 count++;
             } else if ("quote".equals(item)) {
                 if (!quoteOn || quote.isEmpty()) {
                     continue;
                 }
-                TextView line = label(quote, 0xFFC6C6CE, 15f, false);
-                line.setMaxWidth(dp(260));
+                // Serif and bold, the widest thing in the pill: the line is cut rather than wrapped
+                // so the pill stays one row.
+                TextView line = label(quote, 0xFFDDDDE4, 17.5f, true);
+                line.setTypeface(Typeface.create(Typeface.SERIF, Typeface.BOLD));
+                line.setMaxWidth(dp(320));
                 line.setSingleLine(true);
                 line.setEllipsize(TextUtils.TruncateAt.END);
                 row.addView(line, margin());
+                count++;
+            } else if ("bt".equals(item)) {
+                LinearLayout accessories = btChips(devices);
+                if (accessories == null) {
+                    continue;
+                }
+                row.addView(accessories, margin());
                 count++;
             }
         }
@@ -176,6 +209,52 @@ final class StandbyView extends FrameLayout {
         params.leftMargin = dp(4);
         box.addView(degrees, params);
         return box;
+    }
+
+    /**
+     * Accessory glyphs with their percentages, stacked vertically so both fit in the pill's height.
+     *
+     * <p>At most three, the same cap the card uses. A device that never reported a level shows "--"
+     * rather than an invented number.
+     */
+    private LinearLayout btChips(java.util.List<IslandEvent.Bt> devices) {
+        if (devices == null || devices.isEmpty()) {
+            return null;
+        }
+        LinearLayout box = new LinearLayout(getContext());
+        box.setOrientation(LinearLayout.HORIZONTAL);
+        box.setGravity(Gravity.CENTER_VERTICAL);
+        int shown = 0;
+        for (IslandEvent.Bt device : devices) {
+            if (device == null || shown >= 3) {
+                break;
+            }
+            LinearLayout one = new LinearLayout(getContext());
+            one.setOrientation(LinearLayout.VERTICAL);
+            one.setGravity(Gravity.CENTER_HORIZONTAL);
+
+            ImageView glyph = new ImageView(getContext());
+            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(15), dp(15));
+            iconParams.gravity = Gravity.CENTER_HORIZONTAL;
+            glyph.setImageResource(device.icon != 0 ? device.icon : R.drawable.ic_bt_generic);
+            glyph.setScaleType(ImageView.ScaleType.FIT_CENTER);
+            one.addView(glyph, iconParams);
+
+            TextView percent = label(device.level >= 0 ? device.level + "%" : "--",
+                    0xFFC6C6CE, 9.5f, true);
+            percent.setGravity(Gravity.CENTER);
+            one.addView(percent);
+
+            LinearLayout.LayoutParams params = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.WRAP_CONTENT,
+                    LinearLayout.LayoutParams.WRAP_CONTENT);
+            if (shown > 0) {
+                params.leftMargin = dp(7);
+            }
+            box.addView(one, params);
+            shown++;
+        }
+        return shown == 0 ? null : box;
     }
 
     /** Stops the animation when the pill is hidden, so a hidden window costs nothing. */
@@ -235,7 +314,12 @@ final class StandbyView extends FrameLayout {
         return params;
     }
 
-    /** Today's line, picked by day of year so it changes once a day and never at random. */
+    /**
+     * Today's line.
+     *
+     * <p>Indexed by days since the epoch with a stride of seven, so it changes exactly once a day,
+     * never repeats on two days in a row, and does not walk the list in order.
+     */
     private static String quote(Context context) {
         try {
             Resources resources = context.getResources();
@@ -243,8 +327,8 @@ final class StandbyView extends FrameLayout {
             if (quotes.length == 0) {
                 return "";
             }
-            int day = Calendar.getInstance().get(Calendar.DAY_OF_YEAR);
-            return quotes[Math.floorMod(day, quotes.length)];
+            long days = System.currentTimeMillis() / 86_400_000L;
+            return quotes[Math.floorMod(days * 7L, quotes.length)];
         } catch (Throwable ignored) {
             return "";
         }
@@ -320,11 +404,14 @@ final class StandbyView extends FrameLayout {
             final String temp;
             final int code;
             final String aqi;
+            /** Where the numbers came from, so a wrong district can be spotted immediately. */
+            final String place;
 
-            Reading(String temp, int code, String aqi) {
+            Reading(String temp, int code, String aqi, String place) {
                 this.temp = temp;
                 this.code = code;
                 this.aqi = aqi;
+                this.place = place;
             }
         }
 
@@ -389,18 +476,24 @@ final class StandbyView extends FrameLayout {
         }
 
         private static Reading request(Context context, String name) {
-            JSONObject found;
-            try {
-                found = new JSONObject(read(
-                        "https://geocoding-api.open-meteo.com/v1/search?count=1&language=zh&format=json&name="
-                                + encode(name)));
-            } catch (Exception failure) {
-                mark(context, context.getString(R.string.weather_err_network,
-                        "geocoding-api.open-meteo.com", reason(failure)), false);
+            // 「杭州 西湖」 must be asked as 西湖: the endpoint matches one place name, so the pair
+            // used to come back empty and the chip stayed on 杭州市.
+            String term = lookupTerm(name);
+            JSONObject found = search(context, term);
+            if (found == null) {
                 return null;
             }
             JSONArray results = found.optJSONArray("results");
-            JSONObject place = results == null || results.length() == 0 ? null : results.optJSONObject(0);
+            if ((results == null || results.length() == 0) && !term.equals(name)) {
+                // The split term failed, so the user probably typed one long name; try it whole.
+                JSONObject whole = search(context, name);
+                JSONArray again = whole == null ? null : whole.optJSONArray("results");
+                if (again != null && again.length() > 0) {
+                    results = again;
+                    term = name;
+                }
+            }
+            JSONObject place = results == null ? null : pick(results, term);
             if (place == null) {
                 mark(context, context.getString(R.string.weather_err_place, name), false);
                 return null;
@@ -449,10 +542,140 @@ final class StandbyView extends FrameLayout {
                         false);
                 return null;
             }
-            mark(context, context.getString(R.string.weather_ok_fmt,
+            String label = placeLabel(place);
+            mark(context, context.getString(R.string.weather_ok_place, label,
                     temperature == null ? "-" : temperature,
                     air == null ? "-" : air), true);
-            return new Reading(temperature, code, air);
+            return new Reading(temperature, code, air, label);
+        }
+        /** One geocoding call, or null after marking why it failed. */
+        private static JSONObject search(Context context, String term) {
+            try {
+                return new JSONObject(read(
+                        "https://geocoding-api.open-meteo.com/v1/search?count=10&language=zh&format=json"
+                                + (hasHan(term) ? "&countryCode=CN" : "")
+                                + "&name=" + encode(term)));
+            } catch (Exception failure) {
+                mark(context, context.getString(R.string.weather_err_network,
+                        "geocoding-api.open-meteo.com", reason(failure)), false);
+                return null;
+            }
+        }
+
+        /**
+         * The term actually asked for: 「杭州 西湖」 is sent as 西湖. The endpoint matches one place
+         * name, so the pair used to come back empty and the card stayed on 杭州市.
+         */
+        private static String lookupTerm(String input) {
+            String trimmed = input == null ? "" : input.trim();
+            for (int i = trimmed.length() - 1; i > 0; i--) {
+                char c = trimmed.charAt(i);
+                if (c == ' ' || c == '\u3000' || c == ',' || c == '\uff0c' || c == '/' || c == '·') {
+                    return trimmed.substring(i + 1).trim();
+                }
+            }
+            return trimmed;
+        }
+        /** "北京市 朝阳", most specific part first deduplicated, so the user can see what resolved. */
+        private static String placeLabel(JSONObject place) {
+            if (place == null) {
+                return "";
+            }
+            String[] parts = {place.optString("admin1", ""), place.optString("admin2", ""),
+                    place.optString("name", "")};
+            StringBuilder out = new StringBuilder();
+            String previous = "";
+            for (String part : parts) {
+                String key = norm(part);
+                if (key.isEmpty() || key.equals(previous)) {
+                    continue;
+                }
+                if (out.length() > 0) {
+                    out.append(' ');
+                }
+                out.append(part.trim());
+                previous = key;
+            }
+            return out.toString();
+        }
+
+        /**
+         * The best of the ten candidates for what was typed.
+         *
+         * <p>An exact name match beats a district or province that matched by name, and a larger
+         * population only breaks ties, so typing 朝阳区 lands on a Beijing district instead of on
+         * 朝阳市 in Liaoning.
+         */
+        private static JSONObject pick(JSONArray results, String raw) {
+            String wanted = norm(raw);
+            JSONObject best = null;
+            int bestScore = -1;
+            long bestPopulation = -1L;
+            for (int i = 0; i < results.length(); i++) {
+                JSONObject one = results.optJSONObject(i);
+                if (one == null) {
+                    continue;
+                }
+                int score = score(one, wanted);
+                long population = (long) one.optDouble("population", 0d);
+                if (score > bestScore || (score == bestScore && population > bestPopulation)) {
+                    best = one;
+                    bestScore = score;
+                    bestPopulation = population;
+                }
+            }
+            return best;
+        }
+
+        private static int score(JSONObject one, String wanted) {
+            String name = norm(one.optString("name", ""));
+            String admin1 = norm(one.optString("admin1", ""));
+            String admin2 = norm(one.optString("admin2", ""));
+            String admin3 = norm(one.optString("admin3", ""));
+            int score = 0;
+            if (name.equals(wanted)) {
+                score += 60;
+            } else if (name.startsWith(wanted) || wanted.startsWith(name) && name.length() >= 2) {
+                score += 40;
+            }
+            if (admin3.equals(wanted)) {
+                score += 55;
+            }
+            if (admin2.equals(wanted)) {
+                score += 50;
+            }
+            if (admin1.equals(wanted)) {
+                score += 35;
+            }
+            if (!admin2.isEmpty() && (admin2.contains(wanted) || wanted.contains(admin2))) {
+                score += 12;
+            }
+            return score;
+        }
+
+        /** Drops the administrative suffix and the case, so 朝阳区 and 朝阳 compare equal. */
+        private static String norm(String value) {
+            String out = value == null ? "" : value.trim().toLowerCase(Locale.ROOT);
+            String[] suffixes = {"特别行政区", "自治区", "自治州", "自治县", "新区", "地区", "街道",
+                    "省", "市", "区", "县", "旗", "镇", "乡"};
+            for (String suffix : suffixes) {
+                if (out.length() > suffix.length() && out.endsWith(suffix)) {
+                    out = out.substring(0, out.length() - suffix.length());
+                    break;
+                }
+            }
+            return out;
+        }
+
+        /** True when the name has Han characters, which is when a China-only lookup makes sense. */
+        private static boolean hasHan(String value) {
+            for (int i = 0; value != null && i < value.length(); i++) {
+                char one = value.charAt(i);
+                if (one >= 0x4E00 && one <= 0x9FFF) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /** What a thrown failure says, or a dash when it says nothing. */

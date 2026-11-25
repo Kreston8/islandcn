@@ -123,6 +123,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private static final String MUSIC_KEY = "music:";
     /** WeChat's package name, the one source the notification filter can name. */
     private static final String WECHAT = "com.tencent.mm";
+    private static final String QQ = "com.tencent.mobileqq";
 
     static boolean isRunning() {
         return running;
@@ -452,7 +453,7 @@ public final class IslandService extends Service implements IslandBridge.Sink {
      * level without hunting for a setting is the point of the feature.
      */
     private java.util.List<IslandEvent.Bt> chipsFor(int kind) {
-        if (kind != IslandEvent.KIND_MUSIC && !Prefs.opt(this, Prefs.KEY_BT)) {
+        if (kind != IslandEvent.KIND_MUSIC && !Prefs.get(this, Prefs.KEY_BT)) {
             return null;
         }
         if (btWatcher == null) {
@@ -491,30 +492,36 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         }
     }
     /**
-     * The notification filter: one master switch that keeps only WeChat and SMS pickup codes, plus
-     * one switch per source.
+     * The notification whitelist.
      *
-     * <p>Call, alarm, navigation and music are features of their own with their own switches, so the
-     * master never touches them. The two per-source switches bite at any time: turning WeChat off
-     * hides it even with the master off.
+     * <p>v2.10 dropped the old master switch, because the settings screen now lists exactly the
+     * features that were asked for: anything not on that list is not shown at all. Call, alarm and
+     * music come from watchers rather than from notifications; todo, pickup codes, WeChat, QQ and
+     * delivery each obey their own switch, and delivery narrows further to one switch per platform.
      */
     private boolean allow(IslandEvent event) {
-        if (event.kind == IslandEvent.KIND_CALL || event.kind == IslandEvent.KIND_ALARM
-                || event.kind == IslandEvent.KIND_NAV || event.kind == IslandEvent.KIND_MUSIC) {
-            return true;
+        switch (event.kind) {
+            case IslandEvent.KIND_CALL:
+            case IslandEvent.KIND_ALARM:
+            case IslandEvent.KIND_MUSIC:
+                return true;
+            case IslandEvent.KIND_TODO:
+                return Prefs.get(this, Prefs.KEY_TODO);
+            case IslandEvent.KIND_PICKUP:
+                return Prefs.get(this, Prefs.KEY_NOTIFY_PICKUP);
+            case IslandEvent.KIND_DELIVERY:
+                return Delivery.allowed(this, event);
+            default:
+                break;
         }
-        boolean wechat = WECHAT.equals(event.pkg);
-        boolean pickup = event.kind == IslandEvent.KIND_PICKUP;
-        if (wechat && !Prefs.get(this, Prefs.KEY_NOTIFY_WECHAT)) {
-            return false;
+        if (WECHAT.equals(event.pkg)) {
+            return Prefs.get(this, Prefs.KEY_NOTIFY_WECHAT);
         }
-        if (pickup && !Prefs.get(this, Prefs.KEY_NOTIFY_PICKUP)) {
-            return false;
+        if (QQ.equals(event.pkg)) {
+            return Prefs.get(this, Prefs.KEY_NOTIFY_QQ);
         }
-        if (!Prefs.opt(this, Prefs.KEY_NOTIFY_ONLY)) {
-            return true;
-        }
-        return wechat || pickup;
+        // Plain notifications, OTP and navigation are off by design: they are not on the list.
+        return false;
     }
 
     /**

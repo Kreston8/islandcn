@@ -19,6 +19,8 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.util.function.Consumer;
+
 /** Setup screen: the two permissions, the on/off switch, and a preview button. */
 public final class MainActivity extends Activity {
 
@@ -42,6 +44,8 @@ public final class MainActivity extends Activity {
     private LinearLayout standbyRows;
     private TextView weatherState;
     private TextView cityHint;
+    /** Every first-level switch, so resume can re-read them and rebuild the open second level. */
+    private final java.util.List<Primary> primaries = new java.util.ArrayList<Primary>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -114,27 +118,22 @@ public final class MainActivity extends Activity {
         LinearLayout featuresCard = card();
         addFill(featuresCard, text(R.string.settings_title, 16f, COLOR_PRIMARY, true), 0);
         addFill(featuresCard, text(R.string.settings_desc, 13f, COLOR_SECONDARY, false), 6);
-        switchRow(featuresCard, R.string.label_generic, Prefs.KEY_GENERIC);
-        switchRow(featuresCard, R.string.label_otp, Prefs.KEY_OTP);
-        switchRow(featuresCard, R.string.label_pickup, Prefs.KEY_PICKUP);
-        switchRow(featuresCard, R.string.label_delivery, Prefs.KEY_DELIVERY);
-        switchRow(featuresCard, R.string.label_todo, Prefs.KEY_TODO);
-        switchRow(featuresCard, R.string.label_call, Prefs.KEY_CALL);
-        switchRow(featuresCard, R.string.label_alarm, Prefs.KEY_ALARM);
-        switchRow(featuresCard, R.string.label_nav, Prefs.KEY_NAV);
-        switchRow(featuresCard, R.string.label_music, Prefs.KEY_MUSIC);
-        switchRow(featuresCard, R.string.label_lyrics, Prefs.KEY_LYRICS);
+        LinearLayout rows = new LinearLayout(this);
+        rows.setOrientation(LinearLayout.VERTICAL);
+        addFill(featuresCard, rows, 0);
+        primaryRow(rows, R.string.label_notify_wechat, Prefs.KEY_NOTIFY_WECHAT, true, null);
+        primaryRow(rows, R.string.label_qq, Prefs.KEY_NOTIFY_QQ, true, null);
+        primaryRow(rows, R.string.label_notify_pickup, Prefs.KEY_NOTIFY_PICKUP, true, null);
+        primaryRow(rows, R.string.label_delivery, Prefs.KEY_DELIVERY, true, this::deliveryRows);
+        primaryRow(rows, R.string.label_todo, Prefs.KEY_TODO, true, null);
+        primaryRow(rows, R.string.label_call, Prefs.KEY_CALL, true, null);
+        primaryRow(rows, R.string.label_alarm, Prefs.KEY_ALARM, true, null);
+        primaryRow(rows, R.string.label_music, Prefs.KEY_MUSIC, true,
+                box -> subRow(box, getString(R.string.label_lyrics), Prefs.KEY_LYRICS));
+        primaryRow(rows, R.string.label_bt, Prefs.KEY_BT, true, this::bluetoothRows);
         addFill(featuresCard, text(R.string.music_hint, 12f, 0xFF8A8A94, false), 12);
         addFill(featuresCard, text(R.string.lyrics_hint, 12f, 0xFF8A8A94, false), 6);
         addFill(root, featuresCard, 14);
-        LinearLayout notifyCard = card();
-        addFill(notifyCard, text(R.string.notify_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(notifyCard, text(R.string.notify_desc, 13f, COLOR_SECONDARY, false), 6);
-        switchRow(notifyCard, R.string.label_notify_only, Prefs.KEY_NOTIFY_ONLY, false);
-        switchRow(notifyCard, R.string.label_notify_wechat, Prefs.KEY_NOTIFY_WECHAT, true);
-        switchRow(notifyCard, R.string.label_notify_pickup, Prefs.KEY_NOTIFY_PICKUP, true);
-        addFill(notifyCard, text(R.string.notify_hint, 12f, 0xFF8A8A94, false), 8);
-        addFill(root, notifyCard, 14);
 
         LinearLayout btCard = card();
         addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
@@ -142,7 +141,6 @@ public final class MainActivity extends Activity {
         btState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(btCard, btState, 10);
         addTop(btCard, button(R.string.grant, v -> requestBluetooth()), 12);
-        switchRow(btCard, R.string.label_bt, Prefs.KEY_BT, false);
         addFill(btCard, text(R.string.bt_hint, 12f, 0xFF8A8A94, false), 8);
         addFill(root, btCard, 14);
 
@@ -186,6 +184,7 @@ public final class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshState();
+        syncPrimaries();
     }
 
     private void refreshState() {
@@ -335,18 +334,149 @@ public final class MainActivity extends Activity {
                 || Prefs.KEY_STANDBY_WEATHER.equals(key)
                 || Prefs.KEY_STANDBY_AQI.equals(key)
                 || Prefs.KEY_STANDBY_PUPPY.equals(key)
-                || Prefs.KEY_STANDBY_QUOTE.equals(key);
+                || Prefs.KEY_STANDBY_QUOTE.equals(key)
+                || Prefs.KEY_STANDBY_BT.equals(key);
     }
 
     /**
-     * Switches that are read while the service runs (every tick, or on every card), so flipping one
-     * needs no restart: the notification filter and the standby rows both take effect immediately.
+     * Switches read while the service runs, so flipping one needs no restart: the source filters are
+     * consulted on every notification, the platform filter on every delivery card, and the battery
+     * chips are rebuilt each time the pill is drawn.
      */
     private boolean isLiveKey(String key) {
         return isStandbyKey(key)
-                || Prefs.KEY_NOTIFY_ONLY.equals(key)
                 || Prefs.KEY_NOTIFY_WECHAT.equals(key)
-                || Prefs.KEY_NOTIFY_PICKUP.equals(key);
+                || Prefs.KEY_NOTIFY_QQ.equals(key)
+                || Prefs.KEY_NOTIFY_PICKUP.equals(key)
+                || Prefs.KEY_DELIVERY.equals(key)
+                || Prefs.KEY_DELIVERY_MEITUAN.equals(key)
+                || Prefs.KEY_DELIVERY_SHANGOU.equals(key)
+                || Prefs.KEY_DELIVERY_JD.equals(key)
+                || Prefs.KEY_DELIVERY_QIXIAN.equals(key)
+                || Prefs.KEY_BT.equals(key)
+                || key.startsWith(Prefs.KEY_BT_DEVICE);
+    }
+
+    /** A first-level switch plus the second-level rows it owns. */
+    private final class Primary {
+        private final String key;
+        private final boolean defaultOn;
+        private final LinearLayout subs;
+        private final Consumer<LinearLayout> fill;
+
+        Primary(String key, boolean defaultOn, LinearLayout subs, Consumer<LinearLayout> fill) {
+            this.key = key;
+            this.defaultOn = defaultOn;
+            this.subs = subs;
+            this.fill = fill;
+        }
+
+        boolean on() {
+            return defaultOn ? Prefs.get(MainActivity.this, key) : Prefs.opt(MainActivity.this, key);
+        }
+
+        /** Collapses or rebuilds the second level, so a closed parent never shows stale rows. */
+        void sync() {
+            boolean on = on();
+            subs.removeAllViews();
+            subs.setVisibility(on ? View.VISIBLE : View.GONE);
+            if (on && fill != null) {
+                fill.accept(subs);
+            }
+        }
+    }
+
+    /**
+     * One first-level row: the switch that owns a whole feature, then, while it is on, the
+     * second-level switches underneath it. Closed parents fold away on their own.
+     */
+    private Primary primaryRow(LinearLayout parent, int labelRes, String key, boolean defaultOn,
+                               Consumer<LinearLayout> fill) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text(labelRes, 15f, COLOR_PRIMARY, false), new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        LinearLayout subs = new LinearLayout(this);
+        subs.setOrientation(LinearLayout.VERTICAL);
+        subs.setPadding(dp(6), 0, 0, 0);
+        Primary primary = new Primary(key, defaultOn, subs, fill);
+        Switch toggle = new Switch(this);
+        toggle.setChecked(primary.on());
+        toggle.setOnCheckedChangeListener((button, checked) -> {
+            Prefs.set(this, key, checked);
+            primary.sync();
+            if (IslandService.isRunning() && !isLiveKey(key)) {
+                // These watchers only register at start-up, so they need to be re-read.
+                restartService();
+            }
+        });
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        addFill(parent, row, 12);
+        addFill(parent, subs, 0);
+        primaries.add(primary);
+        primary.sync();
+        return primary;
+    }
+
+    /** One second-level row: same shape as a first-level one, smaller type, indented. */
+    private void subRow(LinearLayout parent, CharSequence label, String key) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        TextView name = new TextView(this);
+        name.setText(label);
+        name.setTextSize(13f);
+        name.setTextColor(COLOR_SECONDARY);
+        row.addView(name, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        Switch toggle = new Switch(this);
+        toggle.setChecked(Prefs.get(this, key));
+        toggle.setOnCheckedChangeListener((button, checked) -> Prefs.set(this, key, checked));
+        row.addView(toggle, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        addFill(parent, row, 6);
+    }
+
+    /** The four delivery platforms, each with its own switch under the 外卖进度 master. */
+    private void deliveryRows(LinearLayout parent) {
+        subRow(parent, getString(R.string.label_delivery_meituan), Prefs.KEY_DELIVERY_MEITUAN);
+        subRow(parent, getString(R.string.label_delivery_shangou), Prefs.KEY_DELIVERY_SHANGOU);
+        subRow(parent, getString(R.string.label_delivery_jd), Prefs.KEY_DELIVERY_JD);
+        subRow(parent, getString(R.string.label_delivery_qixian), Prefs.KEY_DELIVERY_QIXIAN);
+    }
+
+    /**
+     * One switch per connected accessory. The list is read live rather than remembered, because
+     * pairings change while the screen is open and a cached list would offer devices in a drawer.
+     */
+    private void bluetoothRows(LinearLayout parent) {
+        java.util.List<String[]> devices;
+        try {
+            devices = BtWatcher.connected(this);
+        } catch (Throwable ignored) {
+            devices = new java.util.ArrayList<String[]>();
+        }
+        if (devices.isEmpty()) {
+            TextView none = text(R.string.bt_no_device, 12f, 0xFF8A8A94, false);
+            none.setLineSpacing(dp(3), 1f);
+            addFill(parent, none, 8);
+            return;
+        }
+        for (String[] device : devices) {
+            String address = device[0];
+            String name = device.length > 1 && device[1] != null && !device[1].isEmpty()
+                    ? device[1] : address;
+            subRow(parent, name, Prefs.KEY_BT_DEVICE + address);
+        }
+    }
+
+    /** Re-reads every switch and rebuilds whatever second level is open (called on resume). */
+    private void syncPrimaries() {
+        for (Primary primary : primaries) {
+            primary.sync();
+        }
     }
 
     /** One row per standby item: its own switch, then the two arrows, in the stored order. */
@@ -389,6 +519,9 @@ public final class MainActivity extends Activity {
         if ("aqi".equals(item)) {
             return Prefs.KEY_STANDBY_AQI;
         }
+        if ("bt".equals(item)) {
+            return Prefs.KEY_STANDBY_BT;
+        }
         return Prefs.KEY_STANDBY_QUOTE;
     }
 
@@ -415,6 +548,9 @@ public final class MainActivity extends Activity {
         }
         if ("aqi".equals(item)) {
             return R.string.label_standby_aqi;
+        }
+        if ("bt".equals(item)) {
+            return R.string.label_standby_bt;
         }
         return R.string.label_standby_quote;
     }

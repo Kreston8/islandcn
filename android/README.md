@@ -11,19 +11,22 @@ exist — per-line lyrics and a temperature — and both are described below wit
 
 ## What it shows
 
-Every notification gets a card. Eight kinds get a richer card — four decided by `ContentParser` from
-the title, body and application, four by their own sources:
+Eight kinds of card remain: the first four are decided by `ContentParser` from title, body and
+application, the rest by their own sources.
 
 | Kind | Trigger | Card |
 |---|---|---|
-| 验证码 | SMS with a code keyword, or a notification containing one | big code + 点击复制 |
+| 微信 | notification from `com.tencent.mm` | avatar + sender + message |
+| QQ | notification from `com.tencent.mobileqq` | avatar + sender + message |
 | 取件码 | SMS with 取件码/取货码/提货码 plus a code nearby | 快递点：取件码 (`菜鸟驿站：1-2-3456`), a tap opens that SMS conversation |
-| 外卖 | "预计 12:35 送达", "还有 18 分钟" | countdown that refreshes every 15 s |
+| 外卖 | "预计 12:35 送达", "还有 18 分钟" | countdown that refreshes every 15 s, gated per platform |
 | 待办 | notification from 小米笔记 / a notes app | tag + the todo text |
 | 来电 | call state callback | tag + 号码 / 未知号码，tap 打开拨号盘 |
 | 闹钟 | next clock alarm, 15 min ahead | tag + 07:30 + 还有 N 分钟响铃 |
-| 导航 | ongoing notification from a whitelisted map app | tag + the next turn |
 | 音乐 | a playing media session, shown only while the launcher is in front | 44 dp strip: album art + one lyric line, lit character by character |
+
+Plain notifications, verification codes and navigation are not shown at all any more — they were
+removed on request, so that an app which is not one of the eight above cannot interrupt anything.
 
 Every card expands to the same 46 dp strip: one icon, one bold line, one body line. The icon is the
 notifying app's own — its large icon first (WeChat and QQ put the contact's avatar there), then a
@@ -40,10 +43,11 @@ code off the collapsed pill.
 
 ### Bluetooth battery chips
 
-When 蓝牙设备电量 is on, the right end of the pill shows one chip per connected accessory — watch,
-earbuds, mouse, anything else — as an icon with the percentage underneath, up to three devices. A lyric
-line always carries them, whatever the switch says, because that is the moment the level matters; the
-pill widens instead of squeezing the text.
+When 蓝牙设备电量显示 is on, the right end of the pill shows one chip per connected accessory — watch,
+earbuds, mouse, anything else — as an icon with the percentage underneath, up to three devices. Each
+device has its own switch under that parent, so one watch can be hidden without hiding the rest, and
+a hidden device gets neither a chip nor a GATT read. A lyric line always carries the chips, because
+that is the moment the level matters; the pill widens instead of squeezing the text.
 
 Android has no public battery API for accessories, so a level is hunted down in three steps, cheapest
 first:
@@ -65,15 +69,22 @@ When 桌面常驻 is on and nothing else is on screen, a second, narrower pill s
 the items you enabled:
 
 - **天气温度** — the current temperature with a weather icon picked from the WMO code, e.g. `23°`.
-  Needs a city name typed in the app; there is no location permission and no GPS.
+  Needs a city name typed in the app; there is no location permission and no GPS. The geocoder is
+  asked for ten candidates and each is scored (exact name > district `admin3` > city `admin2` >
+  province `admin1` > prefix), so 「杭州 西湖」 resolves to 西湖区 instead of 杭州市; what actually
+  resolved is printed in the app as 已定位到 …, because Open-Meteo does not list every district.
 - **空气质量 AQI** — the US AQI for the same city, graded into four colours (<50 green, <100 yellow,
   <150 orange, above that red).
-- **岛仔表情** — two eyes and nothing else: no face, no blush, no colour. Round eyes and a smiling
-  crescent take turns from a hash of the clock and blink every few seconds. Drawn in code as an
-  approximation of the mascot, not the original artwork.
-- **每日一句** — one line of encouragement at 15sp, chosen by day of year so it changes once a day.
+- **岛仔表情** — two eyes and nothing else: no face, no blush, no colour. 32 dp, a 2.4 s mood slot
+  that picks round eyes or a smiling crescent, a blink every 1.7 s with a quarter of them skipped, a
+  gaze drift every 1.2 s and a small bounce after each blink, so it visibly moves. Drawn in code as
+  an approximation of the mascot, not the original artwork.
+- **每日一句** — one line of encouragement at 17.5sp in a bold serif face (宋体). The index is
+  days-since-epoch × 7 mod 30, so it lands on a different line every day instead of walking the list.
+- **蓝牙电量** — the same accessory percentages as the chips, read through the passive path only: the
+  standby pill never opens a GATT connection, so its 4-second refresh cannot disturb a headset.
 
-The four items sit one per row — switch, name, 上移, 下移 — under the master switch, so hiding an item
+The five items sit one per row — switch, name, 上移, 下移 — under the master switch, so hiding an item
 never needs a reorder. While a notification card exists as well the two swap every 3 seconds, and
 closing that notification by hand leaves the standby pill alone on screen. A lyric line outranks both:
 it keeps the pill, gives a fresh notification exactly 3 seconds, then comes back at the position the
@@ -100,8 +111,8 @@ or the screen is locked.
   whenever the system announces a changed alarm, arms a second wake-up a minute past the alarm time
   that withdraws the card, and reconciles card against reality on every call: if the system no longer
   reports the alarm that was announced, the card is removed.
-- Navigation cards come from the map apps listed in `IslandListener.NAV_PACKAGES`: their ongoing
-  notification is allowed through, tagged 导航, and re-posted only when the line changes.
+- Cards are only built from the sources the whitelist names; the old navigation whitelist
+  (`IslandListener.NAV_PACKAGES`) is no longer consulted, because 导航 was removed on request.
 - `ContentParser` (`ContentParser.java`) is the classifier: keyword plus regular expression matching
   for codes, pickup numbers and delivery ETAs.
 - `IslandView` draws the pill and the expanded card with plain platform views, cross-fading the
@@ -121,13 +132,18 @@ or the screen is locked.
   (`geocoding-api.open-meteo.com`) turns the typed city into coordinates, then
   `api.open-meteo.com/v1/forecast?current=temperature_2m,weather_code` returns the temperature and the
   WMO code that picks its icon, and `air-quality-api.open-meteo.com/v1/air-quality?current=us_aqi`
-  adds the AQI. 6 s timeout, memory cache for 30 minutes, one request in flight, nothing requested
+  adds the AQI. The city may name a district: ten candidates are requested in Chinese (with
+  `countryCode=CN` when the input is Han) and each is scored — exact name match 60, district
+  `admin3` 55, city `admin2` 50, province `admin1` 35, prefix 40 — so 「杭州 西湖」 lands on 西湖区
+  rather than 杭州市, and the resolved label is printed as 已定位到 … so a miss is visible instead of
+  silent. 6 s timeout, memory cache for 30 minutes, one request in flight, nothing requested
   without a city. A non-2xx answer throws with its status code instead of being parsed as empty, the
   latest outcome is kept as a line the app prints under the city field (立即测试天气 runs one request
   on the spot), and a failure parks the network for 90 s rather than letting the 4 s tick hammer it.
-  `DaozaiView` (`DaozaiView.java`) draws the mascot: two eyes and nothing else. The mood comes from a
-  hash of the six-second clock slot — round eyes or a smiling crescent — and a second hash of a 3.4 s
-  slot decides the blinks, so a dropped frame costs nothing and there is no state to keep.
+  `DaozaiView` (`DaozaiView.java`) draws the mascot: two eyes and nothing else. A hash of the 2.4 s
+  mood slot picks round eyes or a smiling crescent, a second hash of a 1.7 s slot decides the blinks
+  (a quarter of them skipped) with a small bounce afterwards, and a third of a 1.2 s slot moves the
+  gaze left or right — so a dropped frame costs nothing and there is no state to keep.
 - `IslandBridge` is a static, weakly referenced bus between the components, which run in the same
   process.
 - `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
@@ -136,11 +152,13 @@ or the screen is locked.
   query that resolves the foreground package against every `CATEGORY_HOME` handler — anything that is
   not the launcher hides the strip — and it runs only while a session is playing: pause, screen off
   or a missing usage-access grant cancels it. One card per track.
-- `Prefs` (`Prefs.java`) is the switch store: one boolean per card kind, `on_lyrics` for the lyric
-  lookup, `on_bt` for the battery chips, `on_standby` plus four item switches and an order string for
-  the standby pill, and `on_only` / `on_wechat` / `on_pickup` for the notification filter.
-  `IslandService.onIslandEvent` runs that filter first, then drops a card whose switch is off, both
-  before the overlay is touched at all.
+- `Prefs` (`Prefs.java`) is the switch store: one boolean per first-level feature (`on_wechat`,
+  `on_qq`, `on_pickup`, `on_delivery` plus `dl_meituan` / `dl_shangou` / `dl_jd` / `dl_qixian`,
+  `on_todo`, `on_call`, `on_alarm`, `on_music` with `on_lyrics`, `on_bt` with one `bt_ok:<address>`
+  per accessory), `on_standby` plus five item switches and an order string for the standby pill, and
+  the typed city. `IslandService.allow()` is the whitelist: it decides whether an event may exist at
+  all, then `Prefs.enabled()` drops a card whose own switch is off, both before the overlay is
+  touched.
 - `Lyric` parses LRC (`[mm:ss.cc]` lines, credit lines filtered out) and answers "which line at this
   position" by binary search; `LyricSource` does the one HTTPS lookup per track with a 6 s timeout,
   a 512 KB cap and a 16 entry memory-only cache.
@@ -162,19 +180,34 @@ recording) is dropped instead of shown out of sync.
 
 ## The switches
 
-Every feature has its own switch in the app, 10 for the cards plus the additions:
+The app is a two-level list. Nine first-level switches, top to bottom:
+
+| First level | Default | Second level (only while the parent is on) |
+|---|---|---|
+| 微信 | on | — |
+| QQ | on | — |
+| 短信取件码 | on | — |
+| 外卖进度 | on | 美团, 闪购, 京东, 七鲜 — one per platform, each gating its own arrival card |
+| 待办提醒 | on | — |
+| 来电显示 | on | — |
+| 闹钟 | on | — |
+| 音乐播放与歌词 | on | 联网歌词 — the one lyric lookup per track |
+| 蓝牙设备电量显示 | on | one switch per connected accessory, listed live |
+
+A second level only exists while its parent is on: closing the parent folds the sub-list away and
+throws its rows out, so nothing stays rendered behind a closed switch. Everything that is not in
+this table is gone, and with it three kinds of card: **plain notifications, verification codes and
+navigation no longer reach the island at all.** `IslandService.allow()` is a whitelist, so an app
+that is not represented above cannot pop anything. The platform a delivery card belongs to is read
+from the package name first (`sankuai`/`meituan`, `jingdong`/`com.jd.*`, `shangou`, `qixian`) and
+from the card's own words second, because 七鲜 ships inside a `com.jd.*` package; an unrecognised
+courier is kept rather than dropped. Outside that card:
 
 | Switch | Default | Effect |
 |---|---|---|
-| one per card kind | on | whether that kind of card may appear |
-| 联网歌词 | on | the one lyric lookup per track |
-| 蓝牙设备电量 | off | battery chips at the right end of the pill |
 | 桌面常驻 | off | the standby pill on the launcher |
-| 天气温度 / 空气质量 AQI / 岛仔表情 / 每日一句 | on | which items the standby pill contains; each has its own switch on one row |
-| 只显示微信 + 短信取件码 | off | drops every other app's notifications, verification codes included |
-| 微信通知 | on | WeChat cards, honoured whether the master above is on or off |
-| 短信取件码 | on | pickup-code cards, honoured whether the master is on or off |
-| 城市 | empty | no city means no weather request at all |
+| 天气温度 / 空气质量 AQI / 岛仔表情 / 每日一句 / 蓝牙电量 | on | which items the standby pill holds; each has its own switch on one row |
+| 城市 | empty | no city means no weather request at all; a district works too (「北京 朝阳」) |
 
 ## Permissions the user has to grant
 
@@ -210,8 +243,8 @@ Every feature has its own switch in the app, 10 for the cards plus the additions
   alarm. One alarm is announced once: the trigger time is remembered in `Prefs.KEY_ALARM_SHOWN`.
   A ROM that keeps reporting an alarm the clock app no longer lists would still produce one card;
   the 闹钟 switch is the way out of that.
-- 导航 depends on the map app publishing the next turn as an ongoing notification. The island only
-  shows the latest line.
+- Plain notifications, verification codes and navigation were removed outright in 2.10 — on request,
+  not by accident: the island now only builds cards from the whitelist above.
 - 音乐 shows what the player publishes. Real per-line lyrics are not obtainable offline: 网易云音乐
   keeps its lyrics inside its own UI and puts nothing in the media session, so the line comes from the
   public endpoint on `music.163.com` over HTTPS, once per track, only while 联网歌词 is on, capped at

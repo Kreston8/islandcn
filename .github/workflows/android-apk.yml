@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.9.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.10.<run number>)"
         required: false
         default: ""
   push:
@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-            -PversionName="2.9.${{ github.run_number }}"
+            -PversionName="2.10.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-              "dist/islandcn-island-2.9.${{ github.run_number }}.apk"
+              "dist/islandcn-island-2.10.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,35 +97,35 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.9.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.10.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
           ## English
 
           **What is new in this build**
-          - **The mascot is two eyes and nothing else.** No face, no blush, no colour: two pale eyes on the dark pill, switching at random between round eyes and a smiling crescent, blinking every few seconds. It is one `invalidate()` per frame and no bitmap.
-          - **Line of the day is bigger** (15sp instead of 12.5sp) and may run wider before it is cut off.
-          - **SMS now shows only what matters.** Only pickup codes get a card, and it reads the way the message does — `菜鸟驿站：1-2-3456`, the place first, then the code. It joins the 3-second rotation with everything else, and **a tap goes straight to that SMS conversation**; Android has no public way to open one single message, so the conversation opens on its newest message.
-          - **Long-press the island to copy all of it.** Heading, body and code in one string: `菜鸟驿站：1-2-3456`.
-          - **Bluetooth battery, read the way Settings reads it.** The hidden `BluetoothDevice.getBatteryLevel()` is asked first, then the system's battery broadcast, then a GATT read of the standard battery service (`0x180F`/`0x2A19`) at most once every ten minutes per device, closing the connection the moment the value arrives. A mouse icon joined the headset and watch ones.
-          - **One bar instead of two for the standby pill.** The master switch and every item — weather, AQI, mascot, quote — now share one row: switch, name, up, down. Each item has its own switch, so one can be hidden without reordering anything.
-          - **Notifications, narrowed.** Three switches: *only WeChat plus SMS pickup codes*, then one each for **WeChat** and **SMS pickup codes**, and those two bite at any time whether the master is on or off. Calls, alarms, navigation and music keep their own switches and are never touched by the master.
-          - **Weather finally says what went wrong.** An empty city now states "no city yet" instead of silently drawing nothing; a failure backs off for 90 seconds instead of retrying every four; a non-2xx answer throws with its status code instead of handing an empty body to the parser; and 立即测试天气 runs one request on the spot and prints the raw result in the app.
+          - **Nine switches and nothing else.** The list is now exactly this, top to bottom: **微信, QQ, 短信取件码, 外卖进度, 待办提醒, 来电显示, 闹钟, 音乐播放与歌词, 蓝牙设备电量显示**. Everything that used to sit next to them is gone, and with it two kinds of card: **plain notifications, verification codes and navigation no longer reach the island at all.** That is the requested removal, not a regression — the service now works from a whitelist, so an app that is not on the list cannot pop anything.
+          - **Second-level switches only exist under an open first-level switch.** Each row owns a sub-list that is drawn while the row is on and folded away, with its rows thrown out, the moment it is off. Nothing is left half-rendered behind a closed parent.
+          - **外卖进度 opens four platform switches**: 美团 / 闪购 / 京东 / 七鲜, one per platform, each controlling only its own arrival-time card. The platform is read from the package name first (`sankuai`/`meituan`, `jingdong`/`com.jd.*`, `shangou`, `qixian`) and from the words on the card second, because 美团闪购 lives inside 美团 and 七鲜 ships in a `com.jd.*` package — so the words win for exactly those two instead of letting 京东 swallow 七鲜. A courier that cannot be recognised is kept: dropping an unknown delivery is worse than an extra line.
+          - **Bluetooth: one switch per connected device.** This is the part that was missing. Opening 蓝牙设备电量显示 lists every accessory that is connected right now, with its own switch; turning one off hides its chip and stops the per-device GATT read. The list is read live every time the settings screen resumes, so a headset that was put away does not leave a ghost row.
+          - **The mascot got bigger, faster and more exaggerated.** 24dp to 32dp, the mood slot halved to 2.4 s, a blink every 1.7 s with a quarter of them skipped, a gaze drift to a new position every 1.2 s, and a small bounce after every blink. It is still two pale eyes and no face — the difference is that it now visibly moves instead of looking like a frozen pair of dots.
+          - **Weather resolves down to the 区 level.** The geocoder is asked for ten Chinese candidates, each one is scored (exact name > district `admin3` > city `admin2` > province `admin1` › prefix match) and the best wins, so 「杭州 西湖」 lands on 西湖区 rather than 杭州市. The app prints what actually resolved — 已定位到 … — because Open-Meteo does not cover every district in the country and pretending otherwise would be a lie. City input also accepts 「北京 朝阳」.
+          - **每日一句: a new line every day, in 宋体 bold, at 17.5sp.** The index is days-since-epoch × 7 mod 30, so each day lands on a different line instead of walking the list one by one, and the type is a serif face in bold rather than the system sans at 15sp.
+          - **The standby pill can carry Bluetooth battery as well.** A new 蓝牙电量 item sits in the standby list, on by default, and reads the level through the passive path only — it never opens a GATT connection, so a four-second refresh cannot disturb a connected headset.
 
-          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`, so there is nothing to choose between. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Signing is unchanged, so this installs straight over 2.8.18. Two limits worth knowing: the accessory battery path starts with a hidden platform method that some ROMs block (the GATT read is the fallback, and a classic-only headset has no GATT server to read), and an SMS card opens the conversation, not one specific message. Three hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
+          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Signing is unchanged, so this installs straight over 2.9.19. Limits worth knowing: the accessory battery path starts with a hidden platform method some ROMs block, and a classic-only headset has no GATT server to read, so some devices can only show an icon; Open-Meteo's geocoder does not list every Chinese district, which is why the resolved label is printed for you to check; and an SMS card opens the conversation, not one single message. Four hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
 
           ## 中文
 
           **本次更新**
-          - **岛仔只剩两只眼睛。** 没有脸、没有腮红、没有颜色：深色胶囊上两只浅色眼睛，圆眼和弯眼微笑随机切换，隔几秒眨一下。每帧一次重绘，不占位图。
-          - **每日一句字号再加大**（12.5sp → 15sp），放不下时先允许更宽再截断。
-          - **短信只关注取件码。** 现在只有取件码才上岛，而且按短信原文的样子读出来——`菜鸟驿站：1-2-3456`，先是快递点，再是取件码。它和其他内容一起参与 3 秒轮换，**点一下岛直接跳到那条短信的会话**（原来要点两下，现在卡片本身就是链接）；Android 没有公开接口能定位到「某一条」短信，所以打开的是会话里最新的那条。
-          - **长按岛复制。** 标题、正文和取件码拼成一条：`菜鸟驿站：1-2-3456`。
-          - **蓝牙电量改成系统设置那样的读法。** 先问隐藏的 `BluetoothDevice.getBatteryLevel()`，再读系统的电量广播，最后才用 GATT 读标准电量服务（`0x180F`/`0x2A19`），每个设备 10 分钟内最多读一次，读到立刻断开。图标多了鼠标。
-          - **常驻只剩一条 bar。** 总开关和每一项（天气、AQI、岛仔、每日一句）都在同一行里：开关、名字、↑、↓。每项有独立开关，不想看哪一项直接关掉，不用调顺序。
-          - **通知细分。** 三个开关：*只显示微信 + 短信取件码*，再加 **微信** 和 **短信取件码** 各一个；这两个单独开关随时生效，总开关开不开都算。来电、闹钟、导航、音乐有自己的开关，不受总开关影响。
-          - **天气出问题会说话了。** 没填城市会直接写明「没填城市」，不再默默什么都不画；失败后 90 秒内不再重试，不再每 4 秒打一次；接口返回非 2xx 时带着状态码报错，不再把空字符串丢给解析器；新增「立即测试天气」，当场发一次请求并在界面上打印原始结果。
+          - **只剩九个开关。** 从上到下就是这九项：**微信、QQ、短信取件码、外卖进度、待办提醒、来电显示、闹钟、音乐播放与歌词、蓝牙设备电量显示**。其余全部删掉，连带两类卡片一起删：**普通通知、验证码、导航不再上岛。** 这是要求里的删除，不是坏了——服务端改成白名单，不在列表里的 App 一律弹不出来。
+          - **二级开关只在它的一级开关打开时出现。** 每一行自己带着一层子开关：父开关开着才画，一关就折叠，而且把子项整个丢掉，不会在折叠的父项下面留着半截界面。
+          - **外卖进度下面是四个平台开关**：美团 / 闪购 / 京东 / 七鲜，各管各的预计到达时间卡片。平台先看包名（`sankuai`/`meituan`、`jingdong`/`com.jd.*`、`shangou`、`qixian`），再看卡片上的文字，因为美团闪购就在美团里、七鲜又装在 `com.jd.*` 包里——所以这两家以文字为准，不让京东把七鲜吃掉。认不出来的平台一律放行：漏掉一单比多显示一行糟。
+          - **蓝牙：每台已连接设备一个开关。** 这就是一直没做的那一项。打开「蓝牙设备电量显示」，下面会列出当前连着的每一台设备，各有各的开关；关掉某一台，它就不画电量、也不再为它读 GATT。列表每次回到设置页都重新取，收进抽屉的耳机不会留下幽灵行。
+          - **岛仔更大、更快、更夸张。** 24dp 变 32dp，情绪槽从 4 秒缩到 2.4 秒，1.7 秒眨一次眼、其中四分之一跳过，每 1.2 秒换个方向看，每次眨眼后还会弹一下。仍然只是两只浅色眼睛、没有脸——区别是现在真的看得见它在动，而不是两个冻住的点。
+          - **天气定位精确到区。** 地理编码一次问十个中文候选，逐个打分（名字完全相同 > 区县 `admin3` > 城市 `admin2` > 省 `admin1` > 前缀命中），取分数最高的那个，所以「杭州 西湖」会落到西湖区，不再只剩杭州市。界面会把真正解析到的位置打出来——已定位到 …——因为 Open-Meteo 对国内区县覆盖不全，装着全对才是骗人。城市也支持填「北京 朝阳」这种写法。
+          - **每日一句：每天换一句，宋体加粗，17.5sp。** 索引改成「自纪元起的天数 × 7 mod 30」，每天落在不同的一句上，不会按顺序一句句走；字体从系统黑体 15sp 换成衬线体加粗。
+          - **常驻岛也能显示蓝牙电量。** 常驻列表里多了一项「蓝牙电量」，默认打开，只走被动读取，绝不开 GATT 连接——四秒刷新一次也不会把连着的耳机打断。
 
-          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`，不存在选哪个的问题。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。签名未变，可直接覆盖 2.8.18 安装。两个要提前知道的限制：蓝牙电量第一路走的是隐藏接口，部分 ROM 会拦（GATT 是兜底，而纯经典蓝牙耳机没有 GATT 服务可读）；短信卡片打开的是会话，不是某一条。只访问三个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
+          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。签名未变，可直接覆盖 2.9.19 安装。要提前知道的限制：蓝牙电量第一路是隐藏接口，部分 ROM 会拦，而纯经典蓝牙耳机没有 GATT 服务可读，所以有些设备只能显示图标；Open-Meteo 的地理编码并没有收录国内每一个区，所以界面上会把解析结果显示出来让你自己核对；短信卡片打开的是会话，不是某一条。只访问四个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

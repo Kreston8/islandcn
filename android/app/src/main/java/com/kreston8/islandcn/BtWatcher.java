@@ -125,13 +125,75 @@ final class BtWatcher extends BroadcastReceiver {
     }
 
     /**
-     * One entry per connected accessory, or null when there is nothing to show.
+     * One entry per connected accessory that is switched on, or null when there is nothing to show.
+     */
+    List<IslandEvent.Bt> chips(Context context) {
+        return build(context, true);
+    }
+
+    /**
+     * The chips as they stand right now, for the standby pill.
+     *
+     * <p>No connection is opened here: the pill redraws every four seconds and a GATT read costs the
+     * accessory a link. The platform's own number and the last cached one are used instead, so a
+     * device that never answered simply shows its icon.
+     */
+    static List<IslandEvent.Bt> peek(Context context) {
+        BtWatcher watcher = new BtWatcher();
+        watcher.load(context);
+        return watcher.build(context, false);
+    }
+
+    /**
+     * {@code [address, name]} for every connected accessory, so the settings screen can offer one
+     * switch per device. An empty list means no adapter, no permission, or nothing connected.
+     */
+    static List<String[]> connected(Context context) {
+        List<String[]> out = new ArrayList<>();
+        try {
+            BluetoothManager manager =
+                    (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+            if (manager == null) {
+                return out;
+            }
+            BluetoothAdapter adapter = manager.getAdapter();
+            if (adapter == null || !adapter.isEnabled()) {
+                return out;
+            }
+            Map<String, BluetoothDevice> devices = new LinkedHashMap<>();
+            collect(manager, BluetoothProfile.GATT, devices);
+            collect(manager, BluetoothProfile.HEADSET, devices);
+            BtWatcher watcher = new BtWatcher();
+            watcher.load(context);
+            for (BluetoothDevice device : devices.values()) {
+                if (device == null) {
+                    continue;
+                }
+                String address = addressOf(device);
+                if (!address.isEmpty()) {
+                    out.add(new String[]{address, watcher.nameOf(context, device, address)});
+                }
+            }
+        } catch (Throwable ignored) {
+            // No permission or no Bluetooth stack: the settings screen shows its hint instead.
+        }
+        return out;
+    }
+
+    /** Per-accessory switch; on unless that one device was turned off. */
+    static boolean deviceOn(Context context, String address) {
+        return Prefs.get(context, Prefs.KEY_BT_DEVICE + address);
+    }
+
+    /**
+     * One chip per connected accessory that is switched on.
      *
      * <p>{@code GATT} covers watches and bands, {@code HEADSET} covers earbuds; other profiles never
      * carry a battery. Every platform call needs {@code BLUETOOTH_CONNECT} on Android 12+, so each
-     * one is guarded instead of crashing the overlay.
+     * one is guarded instead of crashing the overlay. {@code ask} decides whether a device with no
+     * cached level may be opened over GATT.
      */
-    List<IslandEvent.Bt> chips(Context context) {
+    private List<IslandEvent.Bt> build(Context context, boolean ask) {
         load(context);
         BluetoothManager manager;
         try {
@@ -163,6 +225,10 @@ final class BtWatcher extends BroadcastReceiver {
                 continue;
             }
             String address = addressOf(device);
+            if (!address.isEmpty() && !deviceOn(context, address)) {
+                // Turned off for this accessory: no chip, and no connection opened for it either.
+                continue;
+            }
             String name = nameOf(context, device, address);
             Integer known = address.isEmpty() ? null : levels.get(address);
             if ((known == null || known < 0) && !address.isEmpty()) {
@@ -173,7 +239,7 @@ final class BtWatcher extends BroadcastReceiver {
                     known = read;
                 }
             }
-            if (known == null || known < 0) {
+            if (ask && (known == null || known < 0) && !address.isEmpty()) {
                 // Nothing cached, so ask the device itself; the answer arrives later and redraws.
                 requestGatt(context, device, address);
             }
@@ -182,7 +248,8 @@ final class BtWatcher extends BroadcastReceiver {
         return chips.isEmpty() ? null : chips;
     }
 
-    private void collect(BluetoothManager manager, int profile, Map<String, BluetoothDevice> into) {
+    private static void collect(BluetoothManager manager, int profile,
+                                Map<String, BluetoothDevice> into) {
         try {
             List<BluetoothDevice> devices = manager.getConnectedDevices(profile);
             if (devices == null) {
