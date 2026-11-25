@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">islandcn</string>
+    <string name="offline_message">islandcn.dev 打不开。检查网络后重试。</string>
+    <string name="retry">重试</string>
+</resources>

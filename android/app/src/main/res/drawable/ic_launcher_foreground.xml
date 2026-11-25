@@ -1,0 +1,13 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- The island pill, drawn inside the adaptive icon safe zone. -->
+    <path
+        android:fillColor="#EDEDED"
+        android:pathData="M38,44 h32 a10,10 0 0 1 0,20 h-32 a10,10 0 0 1 0,-20 z" />
+    <path
+        android:fillColor="#34C759"
+        android:pathData="M62,50 a4,4 0 1 0 0,8 a4,4 0 1 0 0,-8 z" />
+</vector>

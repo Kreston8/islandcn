@@ -24,3 +24,10 @@ next-env.d.ts
 /docs/.blume/
 /docs/dist/
 /public/docs/
+ 
+ # android shell (see android/): gradle output and local SDK paths
+ /android/.gradle/
+ /android/local.properties
+ /android/.kotlin/
+ /.idea/
+ *.iml

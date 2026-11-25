@@ -1,0 +1,78 @@
+name: Build Android APK
+
+# islandcn is a Next.js site plus a shadcn registry, so there is no Android project upstream.
+# This workflow builds the thin WebView shell in android/ and publishes the APK to a release.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create or update (leave empty for apk-v1.0.<run number>)"
+        required: false
+        default: ""
+  push:
+    branches: [android-apk]
+    paths:
+      - "android/**"
+      - ".github/workflows/android-apk.yml"
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.7"
+
+      - name: Ensure SDK platform
+        run: |
+          SDKMAN="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ -x "$SDKMAN" ]; then
+            "$SDKMAN" --install "platforms;android-34" "build-tools;34.0.0" || true
+          fi
+          ls "$ANDROID_HOME/platforms"
+
+      - name: Build release APK
+        working-directory: android
+        run: |
+          gradle assembleRelease --no-daemon --stacktrace \
+            -PversionCode="${{ github.run_number }}" \
+            -PversionName="1.0.${{ github.run_number }}"
+
+      - name: Collect APK
+        run: |
+          mkdir -p dist
+          cp android/app/build/outputs/apk/release/app-release.apk \
+             "dist/islandcn-web-1.0.${{ github.run_number }}.apk"
+          ls -l dist
+          unzip -l dist/*.apk | head -20
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: islandcn-web-apk
+          path: dist/*.apk
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="apk-v1.0.${{ github.run_number }}"; fi
+          echo "Publishing $TAG"
+          gh release create "$TAG" dist/*.apk \
+            --title "islandcn Web APK $TAG" \
+            --notes "Sideload APK for islandcn.dev, built from the WebView shell in \`android/\`." \
+            || gh release upload "$TAG" dist/*.apk --clobber
