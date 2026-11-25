@@ -1,3 +1,5 @@
+import java.io.File
+
 plugins {
     id("com.android.application")
 }
@@ -10,7 +12,7 @@ val appVersionName = (project.findProperty("versionName") as String?) ?: "2.4.0"
 // installs straight over the previous one instead of demanding an uninstall. CI restores the
 // keystore from repository secrets; when it is absent (local build, fork, or a deleted secret) the
 // build falls back to the debug key and then does need a clean install.
-val pinnedKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let { java.io.File(it) }
+val pinnedKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let { File(it) }
 val hasPinnedKey = pinnedKeystore != null && pinnedKeystore.isFile
 
 android {
