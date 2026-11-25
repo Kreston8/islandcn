@@ -43,7 +43,7 @@ final class ContentParser {
             "(\\d{1,3}-\\d{1,3}-\\d{3,5})|([A-Za-z]?\\d{4,8})");
 
     private static final Pattern DELIVERY_KEYWORD = Pattern.compile(
-            "(外卖|骑手|配送|送达|送到|订单|准时达|号外|便当|餐品)");
+            "(外卖|骑手|配送|送达|送到|准时达|便当|餐品)");
 
     private static final Pattern CLOCK_ETA = Pattern.compile(
             "(\\d{1,2})\\s*[:：]\\s*(\\d{2})\\s*(?:前)?\\s*(?:送达|送到|到达)");
