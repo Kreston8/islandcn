@@ -31,3 +31,9 @@ next-env.d.ts
  /android/.kotlin/
  /.idea/
  *.iml
+
+# signing material never goes into a public repo
+*.p12
+*.jks
+*.keystore
+

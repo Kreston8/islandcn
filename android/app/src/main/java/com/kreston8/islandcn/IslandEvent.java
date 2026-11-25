@@ -51,6 +51,17 @@ final class IslandEvent {
         return this;
     }
 
+    /** Timed lyric lines of the current track, or null when none could be found. */
+    Lyric lyric;
+    /** Playback position, in ms, at the moment this event was built. */
+    long position;
+
+    IslandEvent lyric(Lyric value, long positionMs) {
+        this.lyric = value;
+        this.position = positionMs;
+        return this;
+    }
+
     private IslandEvent(
             String key,
             String pkg,
@@ -211,10 +222,11 @@ final class IslandEvent {
     }
 
     /**
-     * The track playing while its player is in the background.
+     * The track playing while the desktop is in front.
      *
-     * <p>The card rotates through the lines the player publishes; no lyrics source is added, so
-     * this stays the title and the artist. Album art is downscaled to {@link #ICON_PX} because a
+     * <p>The strip shows only the cover and one line. {@link #lyric} carries the timed lines when the
+     * lyric lookup found them, so the view can light up the characters as they are sung; without it
+     * the line falls back to the song name. Album art is downscaled to {@link #ICON_PX} because a
      * full-size cover (often 1024x1024, 4 MB) would otherwise stay in memory the whole time.
      */
     static IslandEvent music(

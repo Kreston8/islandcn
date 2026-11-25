@@ -116,7 +116,9 @@ public final class MainActivity extends Activity {
         switchRow(featuresCard, R.string.label_alarm, Prefs.KEY_ALARM);
         switchRow(featuresCard, R.string.label_nav, Prefs.KEY_NAV);
         switchRow(featuresCard, R.string.label_music, Prefs.KEY_MUSIC);
+        switchRow(featuresCard, R.string.label_lyrics, Prefs.KEY_LYRICS);
         addFill(featuresCard, text(R.string.music_hint, 12f, 0xFF8A8A94, false), 12);
+        addFill(featuresCard, text(R.string.lyrics_hint, 12f, 0xFF8A8A94, false), 6);
         addFill(root, featuresCard, 14);
 
         TextView miui = text(R.string.miui_hint, 12f, 0xFF8A8A94, false);

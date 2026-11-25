@@ -23,6 +23,8 @@ final class Prefs {
     static final String KEY_ALARM = "on_alarm";
     static final String KEY_NAV = "on_nav";
     static final String KEY_MUSIC = "on_music";
+    /** Not a card kind: the karaoke line itself, which is the only feature that opens a socket. */
+    static final String KEY_LYRICS = "on_lyrics";
 
     private Prefs() {
     }

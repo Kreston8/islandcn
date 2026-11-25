@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.3.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.4.<run number>)"
         required: false
         default: ""
   push:
@@ -45,18 +45,45 @@ jobs:
           fi
           ls "$ANDROID_HOME/platforms"
 
+      - name: Restore the pinned signing key
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/island.p12"
+            echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/island.p12" >> "$GITHUB_ENV"
+            echo "Pinned key restored: the APK installs over previous versions."
+          else
+            echo "::warning::No ANDROID_KEYSTORE_B64 secret, falling back to the debug key. This APK needs a clean install."
+          fi
+
       - name: Build release APK
         working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-            -PversionName="2.3.${{ github.run_number }}"
+            -PversionName="2.4.${{ github.run_number }}"
+
+      # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
+      - name: Check the signing certificate
+        continue-on-error: true
+        run: |
+          APK="$GITHUB_WORKSPACE/android/app/build/outputs/apk/release/app-release.apk"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* 2>/dev/null | sort -V | tail -1)
+          "$BT/apksigner" verify --print-certs "$APK" | tee cert.txt || true
+          if grep -q "CN=Android Debug" cert.txt 2>/dev/null; then
+            echo "::warning::APK is debug-signed; it cannot update an earlier pinned-key build."
+          fi
 
       - name: Collect APK
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-             "dist/islandcn-island-2.3.${{ github.run_number }}.apk"
+             "dist/islandcn-island-2.4.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -70,9 +97,13 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.3.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.4.${{ github.run_number }}"; fi
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk \
             --title "islandcn 灵动岛 $TAG" \
-            --notes "Native overlay island for Android: SYSTEM_ALERT_WINDOW pill above other apps, NotificationListenerService feed, SMS verification/pickup code cards with copy, delivery countdown, Mi Notes todo cards, incoming-call cards, a fifteen-minute alarm heads-up, navigation lines from whitelisted map apps, and a music card that shows what the player publishes and hides itself when you open the player again. Every kind has its own on/off switch in the app. No WebView and no network access. Sideload build, debug-key signed: uninstall the previous version before installing this one." \
+            --notes "Native overlay island for Android: SYSTEM_ALERT_WINDOW pill above other apps, NotificationListenerService feed, SMS verification/pickup code cards with copy, delivery countdown, Mi Notes todo cards, incoming-call cards, a fifteen-minute alarm heads-up, navigation lines from whitelisted map apps, and a compact music card. The music card is half the height of a normal card (44dp): album art on the left, one lyric line on the right, and the characters light up as they are sung. Every feature has its own switch in the app.
+
+New in this build: the compact karaoke music card, and a pinned release certificate, so future builds install over this one instead of asking for an uninstall. This particular APK is the first one signed with the new key, so it still needs a single uninstall of 2.3.x.
+
+One honest difference from earlier builds: the lyric line is the only feature that uses the network. It asks the public lyrics endpoint on music.163.com over HTTPS, once per track, only while the 联网歌词 switch is on, capped at 512 KB and kept in memory only. The endpoint gives one timestamp per line, so the per-character highlight is interpolated inside the line and will not match every syllable. The 联网歌词 switch turns the socket off completely." \
             || gh release upload "$TAG" dist/*.apk --clobber

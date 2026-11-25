@@ -8,7 +8,12 @@ import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.text.Spannable;
+import android.text.SpannableString;
 import android.text.TextUtils;
+import android.text.style.ForegroundColorSpan;
+import android.text.style.StyleSpan;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
@@ -50,6 +55,9 @@ public final class IslandView extends FrameLayout {
     private static final long COLLAPSE_MS = 280L;
     private static final long TICK_MS = 15000L;
     private static final long CYCLE_MS = 2600L;
+    private static final int H_MUSIC_DP = 44;
+    private static final int W_MUSIC_MAX_DP = 232;
+    private static final long LYRIC_MS = 100L;
 
     private final float density;
     private final int expandedWidthPx;
@@ -82,6 +90,15 @@ public final class IslandView extends FrameLayout {
     private int expandedHeightDp = H_EXPANDED_DP;
     private CharSequence[] cycle;
     private int cycleIndex;
+    private final int musicWidthPx;
+    private int cardWidthPx;
+    private float expandedRadiusDp = R_EXPANDED_DP;
+    private final Runnable lyricTick = this::tickLyric;
+    private Lyric lyric;
+    private long lyricBase;
+    private long lyricAt;
+    private int sungLine = -1;
+    private int sungChars = -1;
 
     IslandView(Context context) {
         super(context);
@@ -89,6 +106,11 @@ public final class IslandView extends FrameLayout {
         expandedWidthPx = Math.min(
                 dp(W_EXPANDED_MAX_DP),
                 getResources().getDisplayMetrics().widthPixels - dp(24));
+
+        musicWidthPx = Math.min(
+                dp(W_MUSIC_MAX_DP),
+                getResources().getDisplayMetrics().widthPixels - dp(24));
+        cardWidthPx = expandedWidthPx;
 
         card = new FrameLayout(context);
         cardBackground.setShape(GradientDrawable.RECTANGLE);
@@ -251,6 +273,8 @@ public final class IslandView extends FrameLayout {
         if (event == null) {
             return;
         }
+        boolean music = event.kind == IslandEvent.KIND_MUSIC;
+        setMusicMode(music);
         if (event.icon != null) {
             appIcon.setImageBitmap(event.icon);
             collapsedIcon.setImageBitmap(event.icon);
@@ -283,11 +307,11 @@ public final class IslandView extends FrameLayout {
             copyRow.setVisibility(View.VISIBLE);
         }
         // The code row needs the vertical space, so the body shrinks to one line.
-        textView.setMaxLines(copyRow.getVisibility() == View.VISIBLE ? 1 : 2);
+        textView.setMaxLines(music || copyRow.getVisibility() == View.VISIBLE ? 1 : 2);
 
         etaMillis = event.etaMillis;
         kind = event.kind;
-        startCycle(event.cycle);
+        startCycle(music ? null : event.cycle);
         ticker.removeCallbacks(tick);
         if (etaMillis > System.currentTimeMillis()) {
             countdownView.setVisibility(View.VISIBLE);
@@ -296,10 +320,22 @@ public final class IslandView extends FrameLayout {
             countdownView.setVisibility(View.GONE);
         }
 
-        expandedHeightDp = H_EXPANDED_DP
-                + (copyRow.getVisibility() == View.VISIBLE ? 26 : 0)
-                + (countdownView.getVisibility() == View.VISIBLE ? 18 : 0);
+        if (kind == IslandEvent.KIND_MUSIC) {
+            // Half the usual height: cover plus one line.
+            expandedHeightDp = H_MUSIC_DP;
+        } else {
+            expandedHeightDp = H_EXPANDED_DP
+                    + (copyRow.getVisibility() == View.VISIBLE ? 26 : 0)
+                    + (countdownView.getVisibility() == View.VISIBLE ? 18 : 0);
+        }
         applyFraction(fraction);
+        boolean karaoke =
+                startLyric(event.kind == IslandEvent.KIND_MUSIC ? event.lyric : null, event.position);
+        if (music && !karaoke) {
+            // No timed lyric for this track, so the single line falls back to the song name.
+            textView.setVisibility(View.VISIBLE);
+            textView.setText(heading);
+        }
 
         setContentDescription(event.appLabel);
     }
@@ -311,6 +347,7 @@ public final class IslandView extends FrameLayout {
     void stopTicker() {
         ticker.removeCallbacks(tick);
         ticker.removeCallbacks(advance);
+        ticker.removeCallbacks(lyricTick);
     }
 
     @Override
@@ -327,8 +364,10 @@ public final class IslandView extends FrameLayout {
         expanded = value;
         if (value) {
             scheduleAdvance();
+            scheduleLyric();
         } else {
             ticker.removeCallbacks(advance);
+            ticker.removeCallbacks(lyricTick);
         }
         float target = value ? 1f : 0f;
         if (!animate) {
@@ -423,15 +462,125 @@ public final class IslandView extends FrameLayout {
         }
     }
 
+    /**
+     * Turns the card into the slim music strip, or back into the normal card.
+     *
+     * <p>Music is the only kind that must stay small: the cover plus one lyric line, so it covers
+     * as little of the launcher as possible.
+     */
+    private void setMusicMode(boolean music) {
+        LinearLayout.LayoutParams icon = (LinearLayout.LayoutParams) appIcon.getLayoutParams();
+        if (music) {
+            headerRow.setVisibility(View.GONE);
+            tagView.setVisibility(View.GONE);
+            copyRow.setVisibility(View.GONE);
+            countdownView.setVisibility(View.GONE);
+            textView.setTextSize(13f);
+            textView.setMaxLines(1);
+            textView.setTextColor(Color.WHITE);
+            icon.width = dp(28);
+            icon.height = dp(28);
+            appIcon.setLayoutParams(icon);
+            expandedBox.setPadding(dp(10), 0, dp(12), 0);
+            cardWidthPx = musicWidthPx;
+            expandedRadiusDp = H_MUSIC_DP / 2f;
+        } else {
+            headerRow.setVisibility(View.VISIBLE);
+            textView.setTextSize(12f);
+            textView.setMaxLines(2);
+            textView.setTextColor(0xFFB9B9C2);
+            icon.width = dp(40);
+            icon.height = dp(40);
+            appIcon.setLayoutParams(icon);
+            expandedBox.setPadding(dp(14), 0, dp(8), 0);
+            cardWidthPx = expandedWidthPx;
+            expandedRadiusDp = R_EXPANDED_DP;
+        }
+    }
+
+    /**
+     * Starts the karaoke line for the track.
+     *
+     * @return true when the track has timed lyrics, so the caller can fall back to plain text.
+     */
+    private boolean startLyric(Lyric lines, long position) {
+        ticker.removeCallbacks(lyricTick);
+        lyric = lines == null || lines.isEmpty() ? null : lines;
+        sungLine = -1;
+        sungChars = -1;
+        if (lyric == null) {
+            return false;
+        }
+        lyricBase = Math.max(0L, position);
+        lyricAt = SystemClock.elapsedRealtime();
+        paintLyric(lyricBase);
+        scheduleLyric();
+        return true;
+    }
+
+    private void scheduleLyric() {
+        ticker.removeCallbacks(lyricTick);
+        if (lyric != null && expanded) {
+            ticker.postDelayed(lyricTick, LYRIC_MS);
+        }
+    }
+
+    private void tickLyric() {
+        if (lyric == null || !expanded) {
+            return;
+        }
+        paintLyric(lyricBase + (SystemClock.elapsedRealtime() - lyricAt));
+        scheduleLyric();
+    }
+
+    /**
+     * Paints one line and lights up the characters already sung.
+     *
+     * <p>Timestamps are per line, so the character position is interpolated across the line. Spans
+     * are only rebuilt when the character count changes, a handful of updates per second.
+     */
+    private void paintLyric(long position) {
+        int index = lyric.indexAt(position);
+        if (index < 0) {
+            // Before the first stamp there is no line yet, so show the opening one, still unlit.
+            if (lyric.lines.length == 0) {
+                return;
+            }
+            index = 0;
+        }
+        long start = lyric.times[index];
+        long end = lyric.endAt(index);
+        String line = lyric.lines[index];
+        float ratio = end > start ? (position - start) / (float) (end - start) : 1f;
+        int lit = Math.round(line.length() * Math.max(0f, Math.min(1f, ratio)));
+        if (index == sungLine && lit == sungChars) {
+            return;
+        }
+        sungLine = index;
+        sungChars = lit;
+        SpannableString styled = new SpannableString(line);
+        if (lit > 0) {
+            styled.setSpan(new ForegroundColorSpan(Color.WHITE), 0, lit,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+            styled.setSpan(new StyleSpan(Typeface.BOLD), 0, lit,
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        if (lit < line.length()) {
+            styled.setSpan(new ForegroundColorSpan(0x66FFFFFF), lit, line.length(),
+                    Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        textView.setText(styled);
+    }
+
     private void applyFraction(float value) {
         // Overshoot pushes the fraction past 1, which is fine for the bounce but not for sizes.
         float clamped = Math.max(0f, Math.min(1f, value));
         ViewGroup.LayoutParams params = card.getLayoutParams();
-        params.width = Math.round(lerp(dp(W_COLLAPSED_DP), expandedWidthPx, clamped));
+        params.width = Math.round(lerp(dp(W_COLLAPSED_DP), cardWidthPx, clamped));
         params.height = Math.round(lerp(dp(H_COLLAPSED_DP), dp(expandedHeightDp), clamped));
         card.setLayoutParams(params);
 
-        cardBackground.setCornerRadius(lerp(dp(H_COLLAPSED_DP) / 2f, dp(R_EXPANDED_DP), clamped));
+        cardBackground.setCornerRadius(lerp(dp(H_COLLAPSED_DP) / 2f, dp(expandedRadiusDp), clamped));
 
         expandedBox.setAlpha(clamped);
         expandedBox.setVisibility(clamped > 0.02f ? View.VISIBLE : View.INVISIBLE);

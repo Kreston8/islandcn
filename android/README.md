@@ -21,7 +21,7 @@ the title, body and application, four by their own sources:
 | 来电 | call state callback | tag + 号码 / 未知号码，tap 打开拨号盘 |
 | 闹钟 | next clock alarm, 15 min ahead | tag + 07:30 + 还有 N 分钟响铃 |
 | 导航 | ongoing notification from a whitelisted map app | tag + the next turn |
-| 音乐 | a playing media session whose app is in the background | tag + 歌名 / 歌手, rotating every 2.6 s |
+| 音乐 | a playing media session, shown only while the launcher is in front | 44 dp strip: album art + one lyric line, lit character by character |
 
 The code rows copy to the clipboard and collapse the island; the notification itself is left in the
 shade so the copy is never destructive.
@@ -54,21 +54,23 @@ shade so the copy is never destructive.
   process.
 - `MediaWatcher` (`MediaWatcher.java`) reads the playing session through `MediaSessionManager`, which
   rides on the notification access the app already has. Track changes arrive as
-  `MediaController.Callback`, so nothing polls for metadata. The only timer is a 2.5 s
-  `UsageStatsManager` query answering "is the player on screen again", and it runs only while a
-  session is playing: pause, screen off or a missing usage-access grant cancels it. One card per
-  track.
-- `Prefs` (`Prefs.java`) is the nine-way switch store. `IslandService.onIslandEvent` drops a card
-  whose switch is off before the overlay is touched at all.
-- `MainActivity` is the setup screen: permission states, start/stop, a preview that posts a fake
-  verification code, and one on/off switch per kind.
+  `MediaController.Callback`, so nothing polls for metadata. The only timer is a 2.5 s `UsageEvents`
+  query that resolves the foreground package against every `CATEGORY_HOME` handler — anything that is
+  not the launcher hides the strip — and it runs only while a session is playing: pause, screen off
+  or a missing usage-access grant cancels it. One card per track.
+- `Prefs` (`Prefs.java`) is the switch store: one boolean per card kind plus `on_lyrics` for the
+  lyric lookup. `IslandService.onIslandEvent` drops a card whose switch is off before the overlay is
+  touched at all.
+- `Lyric` parses LRC (`[mm:ss.cc]` lines, credit lines filtered out) and answers "which line at this
+  position" by binary search; `LyricSource` does the one HTTPS lookup per track with a 6 s timeout,
+  a 512 KB cap and a 16 entry memory-only cache.
 
 Behaviour: tap the pill to expand, tap the card to open the notification's app, swipe up or tap the
 cross to dismiss (which cancels the notification), auto collapse after 4.2 s, and removing the
 notification from the shade hides the island.
 
-The music card is the exception to the 4.2 s collapse: it stays open so its lines can rotate, and it
-disappears by itself the moment you open the player or pause the track.
+The music card is the exception to the 4.2 s collapse: it stays open so the karaoke line keeps
+ticking, and it disappears by itself the moment you open any app or pause the track.
 
 ## Permissions the user has to grant
 
@@ -77,8 +79,9 @@ disappears by itself the moment you open the player or pause the track.
 3. **SMS** (`RECEIVE_SMS`), optional, for codes that never reach the shade.
 4. **Phone** (`READ_PHONE_STATE`), optional, for incoming-call cards. On Android 12+ the card still
    says 未知号码, because the caller id is no longer shared with third-party apps.
-5. **Usage access** (`PACKAGE_USAGE_STATS`), optional, so the music card knows when the player is in
-   front again. One cheap query every 2.5 s, and only while a track is actually playing.
+5. **Usage access** (`PACKAGE_USAGE_STATS`), optional but required for the desktop-only rule: it is
+   how the music strip knows the launcher is in front. One cheap query every 2.5 s, only while a
+   track is actually playing.
 6. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
    started from the background.
 7. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
@@ -102,13 +105,19 @@ disappears by itself the moment you open the player or pause the track.
 
 
 - 音乐 shows what the player publishes — title, artist, album art. Real per-line lyrics are not
-  obtainable offline: 网易云音乐 (like most players) keeps the lyrics inside its own UI and puts
-  nothing in the media session or the metadata, and reading that UI is pointless here because the
-  card is hidden exactly while that UI is on screen. Scrolling lyrics would need either a network
-  lyrics source (this app deliberately has no network permission) or accessibility scraping; both
-  are opt-in features, never the default.
-- The music card needs the **usage access** grant to hide itself when you return to the player.
-  Without it the card still appears, but only goes away on pause or on the next track.
+  obtainable offline: 网易云音乐 keeps its lyrics inside its own UI and puts nothing in the media
+  session, and reading that UI is pointless here because the card is hidden exactly while that UI is
+  on screen. So the lyric line comes from the public lyrics endpoint on `music.163.com` over HTTPS,
+  once per track, only while the 联网歌词 switch is on, capped at 512 KB, cached in memory only and
+  dropped when the track changes or the service stops.
+
+  That endpoint gives one timestamp per line, not per syllable, so the character-by-character light
+  up is interpolated linearly inside each line. It shows which line is being sung and roughly how far
+  into it the singer is; it is not word accurate. When the lookup fails, or the switch is off, that
+  single line shows the song name instead.
+- The music strip is **desktop only** (see below) and needs the **usage access** grant for that:
+  without it the app cannot tell the launcher from an app, so the strip falls back to showing over
+  any screen. The foreground query is one cheap call every 2.5 s, and only while a track plays.
 ## Build
 
 Locally, with JDK 17 and the Android SDK (`compileSdk 34`):
@@ -118,6 +127,13 @@ cd android
 gradle assembleRelease
 # android/app/build/outputs/apk/release/app-release.apk
 ```
+
+Signing is pinned: `app/build.gradle.kts` reads `ANDROID_KEYSTORE_PATH`,
+`ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD` and uses that PKCS12
+keystore when they are set, so consecutive releases install over each other. Without them it falls
+back to the debug key, and such a build needs an uninstall first. The key is not in this repo: it
+lives in the repository secrets and in the maintainer's offline backup. Losing it means exactly one
+more uninstall.
 
 Or push to the `android-apk` branch / run the **Build Android APK** workflow by hand; it builds the
 APK and attaches it to a GitHub release.

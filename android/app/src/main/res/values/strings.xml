@@ -69,10 +69,12 @@
     <string name="label_alarm">闹钟</string>
     <string name="label_nav">导航</string>
     <string name="label_music">音乐播放</string>
-    <string name="music_hint">音乐卡片只在你离开音乐 App、且仍在播放时出现，歌名和歌手轮流显示；回到音乐 App 就自动收起。逐句滚动歌词需要播放器把歌词交给系统，网易云音乐没有开放这个接口，所以这里显示的是播放器给出的曲目信息。</string>
+    <string name="music_hint">音乐卡片只在桌面、且音乐还在播放时出现，只有普通卡片的一半高：左边专辑封面，右边一行字。打开任何 App（包括音乐 App）它就收起，回到桌面再出现。有歌词时这一行会跟着唱到的字亮起来。</string>
+    <string name="label_lyrics">联网歌词</string>
+    <string name="lyrics_hint">歌词来自网易云音乐的公开歌词接口（music.163.com，只用 HTTPS，只在音乐卡片开着、真的在放某首歌时请求一次，每首歌最多 512 KB，只存在内存里）。这是本应用唯一会联网的地方——关掉这一项就完全不联网。接口只提供「每句」的时间点，所以逐字高亮是按句内匀速推算的，快慢不会和真实演唱完全一致；找不到歌词或关掉这一项时，这一行显示歌名。</string>
 
     <string name="perm_usage_title">5. 使用情况访问</string>
-    <string name="perm_usage_desc">用来判断音乐 App 是不是正处在前台，从而在你回到音乐 App 时收起灵动岛。只有音乐在播放时才会每 2.5 秒查询一次，暂停、锁屏后完全停止。不授权也能用，只是卡片不会自动隐藏。</string>
+    <string name="perm_usage_desc">用来判断现在在不在桌面，从而让音乐卡片只在桌面显示、进任何 App 都收起。只有音乐在播放时才会每 2.5 秒查询一次，暂停、锁屏后完全停止。这项必须授权，「只在桌面显示」才生效；不授权时卡片会在所有界面上显示。</string>
 
     <string name="miui_hint">MIUI / HyperOS 提示：除上面几项权限，还需要在「应用管理 → islandcn 灵动岛 → 权限」里打开「后台弹出界面」，否则从后台弹不出胶囊。锁屏时系统会隐藏悬浮窗，这是系统限制。</string>
 </resources>

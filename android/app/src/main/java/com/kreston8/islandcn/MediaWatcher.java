@@ -2,6 +2,7 @@ package com.kreston8.islandcn;
 
 import android.app.AppOpsManager;
 import android.content.ComponentName;
+import android.content.pm.ResolveInfo;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
@@ -12,21 +13,27 @@ import android.media.session.MediaSessionManager;
 import android.media.session.PlaybackState;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /**
- * Shows a now-playing card while music plays in the background.
+ * Shows a now-playing strip while music plays and the desktop is what is on screen.
+ *
+ * <p>The strip belongs to the launcher. Over any app it would sit on top of content the user is
+ * actually reading, so the rule is simply "hide unless the desktop is in front".
  *
  * <p>Cost discipline, because this runs for as long as the service does:
  * <ul>
  *   <li>Track changes arrive through {@link MediaController.Callback}; nothing is polled for them.
- *   <li>The only polling is "is the music app on screen yet", at one cheap query every 2.5 s, and
- *       only while a session is actually playing. It stops on pause, on screen off and when the
- *       usage-access permission is missing.
+ *   <li>The only polling is "is the desktop in front", one cheap query every 2.5 s, and only while a
+ *       session is actually playing. It stops on pause, on screen off, and when the usage-access
+ *       permission is missing.
  *   <li>One card is posted per track, not per second.
  * </ul>
  */
@@ -53,6 +60,9 @@ final class MediaWatcher {
     private boolean screenOn = true;
     private String shownKey;
     private String lastTrack;
+    private String lyricKey;
+    private Lyric lyric;
+    private Set<String> homePackages;
 
     private final Runnable poll = new Runnable() {
         @Override
@@ -113,6 +123,7 @@ final class MediaWatcher {
         handler.removeCallbacks(poll);
         polling = false;
         hide();
+        LyricSource.idle();
         if (registered && sessions != null) {
             try {
                 sessions.removeOnActiveSessionsChangedListener(sessionsListener);
@@ -206,7 +217,8 @@ final class MediaWatcher {
             hide();
             return;
         }
-        if (isMusicForeground(pkg)) {
+        if (hasUsageAccess() && !isHomeForeground()) {
+            // Desktop only: over any app the strip would just cover what the user is reading.
             hide();
             schedulePoll();
             return;
@@ -233,6 +245,9 @@ final class MediaWatcher {
             hide();
             return;
         }
+        String song = title == null ? "" : title.toString();
+        String singer = artist == null ? "" : artist.toString();
+        card.lyric(lyricFor(LyricSource.keyOf(song, singer), song, singer), positionOf(active));
         shown = true;
         shownKey = card.key;
         lastTrack = track;
@@ -247,6 +262,8 @@ final class MediaWatcher {
         shown = false;
         shownKey = null;
         lastTrack = null;
+        lyricKey = null;
+        lyric = null;
     }
 
     private void schedulePoll() {
@@ -260,6 +277,48 @@ final class MediaWatcher {
         }
         polling = true;
         handler.postDelayed(poll, POLL_MS);
+    }
+
+    /**
+     * Lyric for this track, starting the lookup when it is not known yet.
+     *
+     * <p>Only one request runs at a time, so skipping through a playlist cannot pile up
+     * connections, and an answer for a track that is no longer playing is dropped.
+     */
+    private Lyric lyricFor(String key, String title, String artist) {
+        if (!key.equals(lyricKey)) {
+            lyricKey = key;
+            lyric = null;
+            if (Prefs.get(context, Prefs.KEY_LYRICS)) {
+                LyricSource.get(title, artist, this::onLyric);
+            }
+        }
+        return lyric;
+    }
+
+    private void onLyric(String key, Lyric found) {
+        if (!key.equals(lyricKey) || !shown || found == null || found.isEmpty()) {
+            // A late answer, or the track changed while the request was in flight.
+            return;
+        }
+        lyric = found;
+        // Force exactly one re-post; the card key is unchanged so nothing re-expands.
+        lastTrack = null;
+        refresh();
+    }
+
+    /** Where the player is right now, in ms, extrapolated from its last state update. */
+    private long positionOf(MediaController active) {
+        PlaybackState state = active.getPlaybackState();
+        if (state == null) {
+            return 0L;
+        }
+        long position = Math.max(0L, state.getPosition());
+        if (state.getState() == PlaybackState.STATE_PLAYING) {
+            position += Math.max(0L,
+                    SystemClock.elapsedRealtime() - state.getLastPositionUpdateTime());
+        }
+        return position;
     }
 
     private boolean hasUsageAccess() {
@@ -277,7 +336,8 @@ final class MediaWatcher {
     }
 
     /** True when the player itself is the app the user is looking at. */
-    private boolean isMusicForeground(String pkg) {
+    /** True when the launcher, that is the desktop, is the app in front. */
+    private boolean isHomeForeground() {
         if (!hasUsageAccess()) {
             return false;
         }
@@ -313,7 +373,28 @@ final class MediaWatcher {
         } catch (Throwable ignored) {
             return false;
         }
-        return pkg.equals(latest);
+        return latest != null && homePackages().contains(latest);
+    }
+
+    /** Every package that can act as HOME; MIUI images usually resolve more than one. */
+    private Set<String> homePackages() {
+        if (homePackages != null) {
+            return homePackages;
+        }
+        homePackages = new HashSet<>();
+        try {
+            Intent home = new Intent(Intent.ACTION_MAIN);
+            home.addCategory(Intent.CATEGORY_HOME);
+            List<ResolveInfo> handlers = context.getPackageManager().queryIntentActivities(home, 0);
+            for (ResolveInfo info : handlers) {
+                if (info.activityInfo != null) {
+                    homePackages.add(info.activityInfo.packageName);
+                }
+            }
+        } catch (Throwable ignored) {
+            // Nothing resolves: nothing counts as the desktop, so the strip stays hidden.
+        }
+        return homePackages;
     }
 
     private void registerScreenReceiver() {

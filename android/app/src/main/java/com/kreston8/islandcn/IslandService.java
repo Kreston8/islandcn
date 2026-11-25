@@ -108,14 +108,18 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         if (island == null) {
             return;
         }
+        boolean sameCard = current != null && event.key.equals(current.key) && island.isExpanded();
         current = event;
         currentKey = event.key;
         island.bind(event);
         island.setVisibility(View.VISIBLE);
-        island.setExpanded(true, true);
+        if (!sameCard) {
+            // Re-binding the card already on screen (a lyric arriving late) must not reopen it.
+            island.setExpanded(true, true);
+        }
         handler.removeCallbacks(collapseTask);
         if (event.kind != IslandEvent.KIND_MUSIC) {
-            // The music card stays open, otherwise its lines would be clipped while rotating.
+            // The music card stays open, otherwise the karaoke line would stop updating.
             handler.postDelayed(collapseTask, AUTO_COLLAPSE_MS);
         }
     }

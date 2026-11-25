@@ -4,7 +4,14 @@ plugins {
 
 // CI passes -PversionCode / -PversionName so every release build is unique.
 val appVersionCode = (project.findProperty("versionCode") as String?)?.toIntOrNull() ?: 1
-val appVersionName = (project.findProperty("versionName") as String?) ?: "2.0.0"
+val appVersionName = (project.findProperty("versionName") as String?) ?: "2.4.0"
+
+// The release certificate is pinned: the same RSA-2048 key signs every build, so a newer APK
+// installs straight over the previous one instead of demanding an uninstall. CI restores the
+// keystore from repository secrets; when it is absent (local build, fork, or a deleted secret) the
+// build falls back to the debug key and then does need a clean install.
+val pinnedKeystore = System.getenv("ANDROID_KEYSTORE_PATH")?.let { java.io.File(it) }
+val hasPinnedKey = pinnedKeystore != null && pinnedKeystore.isFile
 
 android {
     namespace = "com.kreston8.islandcn"
@@ -18,12 +25,28 @@ android {
         versionName = appVersionName
     }
 
+    signingConfigs {
+        if (hasPinnedKey) {
+            create("pinned") {
+                storeFile = pinnedKeystore
+                storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ANDROID_KEY_ALIAS")
+                keyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+                // PKCS12 keeps one password for the store and the key, the values are the same.
+                storeType = "PKCS12"
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             isShrinkResources = false
-            // Sideload build: signed with the debug key so it installs without a keystore in CI.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasPinnedKey) {
+                signingConfigs.getByName("pinned")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
     }
