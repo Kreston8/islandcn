@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.13.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.14.<run number>)"
         required: false
         default: ""
   push:
@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-          -PversionName="2.13.${{ github.run_number }}"
+          -PversionName="2.14.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-          "dist/islandcn-island-2.13.${{ github.run_number }}.apk"
+          "dist/islandcn-island-2.14.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,33 +97,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.13.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.14.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
           ## English
 
           **What is new in this build**
-          - **The island now survives leaving the app.** Closing the settings screen could take the island with it. The service is sticky, it keeps its window alive when the task is removed, and a 15-minute watchdog restarts it after a ROM has quietly killed it. It also comes back after a reboot or an update, but only if it was running when the app was last closed. A new card, 后台常驻, shows whether the app is exempt from battery optimisation and offers both switches: ignore battery optimisation, and the MIUI page for 自启动 / 省电策略.
-          - **A tidier Settings screen.** The long paragraph under the title and the six permission blurbs are folded away behind a round "?" button. The permission state itself still shows at a glance.
-          - **The smiling eyes were too close.** They touched; the gap is now about a fifth of the eye box.
-          - **Tapping the temperature or the AQI badge opens the weather app** — MIUI weather first, then a few other ROMs, then weather.miui.com in a browser.
-          - **Long-press on the standby pill finally does something.** Hold it and it shivers; swipe up while it shivers and it disappears for three minutes, then comes back by itself. The same hold-and-swipe works on the notification card, and the shiver is actually visible: the window now has slack on both sides, so the card moves inside it instead of being clipped by it.
-          - **Lyrics are steadier.** A failed lookup no longer poisons that track for the rest of the session; a late answer is stored instead of thrown away; the drift allowance is 400 ms instead of 700; and while timed lyrics are on, the playback position is re-read every second. Retries back off 15 s, 30 s, 60 s, so a track with no lyrics anywhere does not turn into a network loop.
-          - **Baseus earbud battery.** When the classic A2DP accessory has no readable battery, the app now looks for the same device over BLE: a GATT read of the standard battery service and a notification subscription, whichever answers first, plus — when the BLE address differs from the classic one, which is normal on TWS — an 8-second name-matched scan to find the twin. Bowie M2 is recognised by name as well.
+          - **The app is called 岛仔 now**, with its own icon: one white capsule, two round eyes, one smile, drawn for this app and not borrowed from anyone. Nothing else changed identity: the package name stays the same, so this installs straight over the previous version and keeps your settings. The old name used a term that belongs to someone else, which is a needless risk for a public download.
+          - **The settings page is half a screen shorter.** Each permission is now one line — title, its "?" right beside the title, and 去授权 pinned to the right edge — with the status underneath. The service card got the same treatment: 运行状态 and the start/stop button share a line, 预览效果 moved to a quiet link on the right.
+          - **The temperature tap opens the phone's own weather app now.** The real cause was Android 11 package visibility: without a `<queries>` block the launcher lookup for 小米天气 answers null, so the tap fell through to the web page every single time. The manifest declares it, and the tap now tries the exact MIUI activities by name before any package lookup, then scans launcher labels for anything called 天气, and only then falls back to the browser.
+          - **The connected-device list is read through public APIs.** The old path called a hidden `BluetoothManager.getConnectedDevices(int)`, which Android 12+ is free to refuse — that is why the Bluetooth card could stay empty on a phone that was plainly playing music over A2DP. The list now merges three sources: the hidden call (kept, it is free when it works), an asynchronous A2DP/HEADSET/GATT profile proxy with an 8-second cache, and paired devices that already report a battery. The diagnostics line now starts with the CONNECT/SCAN permission state and says which source produced the list.
 
-          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面, and for the island to stay up after you leave the app it needs 自启动 with an unrestricted 省电策略. Signing is unchanged, so this installs straight over 2.12.23. Limits worth knowing: Android 12 and newer forbids starting a foreground service from the background, so the watchdog can only bring the island back when the app is exempt from battery optimisation — that is what the new card is for; a classic-only headset has no GATT server to read and some ROMs block the hidden platform method, so some devices can only show an icon; Open-Meteo's geocoder does not list every Chinese district, which is why the resolved label is printed for you to check; and an SMS card opens the conversation, not one single message. Four hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
+          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面, and for 岛仔 to stay up after you leave the app it needs 自启动 with an unrestricted 省电策略. Limits worth knowing: Android 12 and newer forbids starting a foreground service from the background, so the 15-minute watchdog can only bring the island back when the app is exempt from battery optimisation; tapping the temperature needs 后台弹出界面 to be on, because MIUI silently drops an activity started from a background process; a classic-only headset has no GATT server to read, and some buds only report battery over the vendor's own channel, so the chip may show an icon without a number — send me the diagnostic line and I can tell you which case you are in; Open-Meteo's geocoder does not list every Chinese district, which is why the resolved label is printed for you to check; and an SMS card opens the conversation, not one single message. Four hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
 
           ## 中文
 
           **本次更新**
-          - **退出应用，灵动岛不再跟着消失。** 服务改成常驻粘性，任务被划掉时不拆窗口，另有一个 15 分钟的看门狗，被系统悄悄杀掉后自己把它拉回来；重启手机或覆盖安装后也会恢复，但只在你上次是开着它的情况下恢复。设置页新增「后台常驻」卡片：显示是否已忽略电池优化，并提供「忽略电池优化」和「应用设置」（自启动 / 省电策略）两个按钮。
-          - **设置页收干净了。** 大标题下那一段介绍、以及六个权限的小字说明，全部折进标题右边一个圆形「?」按钮里；权限本身有没有给，仍然一眼能看到。
-          - **弯眼睛分开了。** 原来两只眼连在一起，现在中间留出约五分之一眼框的缝。
-          - **点温度或空气质量标识，现在会打开天气应用** —— 先试小米天气，再试几家的天气应用，都不行就用浏览器打开 weather.miui.com。
-          - **常驻胶囊的长按终于有用了。** 长按住它会抖动，此时上滑就消失三分钟，到点自己回来。通知卡片同样支持长按抖动+上滑隐藏，而且这次真的看得见：窗口两侧留了余量，卡片在窗口里移动，不再被自己的窗口裁掉。
-          - **歌词稳了一些。** 取词失败不再把这首歌永久钉死；迟到的答案会存下来而不是丢掉；播放进度的容差从 700 ms 收紧到 400 ms；开着逐字歌词时，每秒重新读一次播放进度。失败重试按 15 秒、30 秒、60 秒退避，没歌词的曲子不会变成网络空转。
-          - **倍思耳机电量。** 经典蓝牙（A2DP）读不到电量时，现在会按同一个名字去 BLE 上找它的另一面：先读标准电量服务，再订阅电量变化通知，谁先回就用谁；如果 BLE 地址和经典地址不一样（TWS 很常见），再做一次 8 秒的名字匹配扫描去找那一路。倍思 Bowie M2 也按名字认了。
+          - **应用改名叫「岛仔」了**，图标也换成自己的：一颗白胶囊、两只圆眼、一个笑，自己画的，没借任何人的图形。除此之外身份没变：包名不动，所以可以直接覆盖升级，设置都还在。原来的名字用了属于别人的词汇，公开分发是没必要的风险。
+          - **设置页矮了将近一屏。** 每条权限现在只占一行——标题、紧挨着标题的「?」、最右侧的「去授权」，状态压在下面一行；运行状态卡片同样处理：运行状态和启停按钮并排，预览效果收到右侧做个小链接。
+          - **点温度现在真的打开手机自带的天气应用。** 真正的原因是 Android 11 起的包可见性：没有 `<queries>` 声明，查小米天气的启动入口一律返回空，所以每次都会掉到网页兜底。现在清单里声明了，点击时先按 Activity 全名直呼小米天气，再按包名查，再扫一遍启动器里叫「天气」的应用，最后才是浏览器。
+          - **已连接设备列表改走公开接口。** 原来调用的是隐藏的 `BluetoothManager.getConnectedDevices(int)`，Android 12 起系统有权直接拒绝——这就是明明在用 A2DP 放歌、蓝牙卡片却空着的原因。现在列表合并三个来源：老接口（留着，能用就是白捡）、A2DP/HEADSET/GATT 的 profile 代理异步查询（带 8 秒缓存）、以及已经能报出电量的配对设备。诊断行开头会写 CONNECT/SCAN 权限状态，末尾写明这次的列表是哪个来源给出的。
 
-          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS；MIUI 还需开启「后台弹出界面」，而想让灵动岛在你退出应用后继续活着，还要开「自启动」并把「省电策略」设为无限制。签名未变，可直接覆盖 2.12.23 安装。要提前知道的限制：Android 12 起禁止后台启动前台服务，所以看门狗只有在应用已忽略电池优化时才能把灵动岛拉回来——这就是新卡片的作用；纯经典蓝牙耳机没有 GATT 服务可读，部分 ROM 又会拦下隐藏的系统接口，所以有些设备只能显示图标；Open-Meteo 的地理编码并没有收录国内每一个区，所以界面上会把解析结果显示出来让你自己核对；短信卡片打开的是会话，不是某一条。只访问四个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
+          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS；MIUI 还需开启「后台弹出界面」，而想让岛仔在你退出应用后继续活着，还要开「自启动」并把「省电策略」设为无限制。要提前知道的限制：Android 12 起禁止后台启动前台服务，所以 15 分钟的看门狗只有在应用已忽略电池优化时才能把岛仔拉回来；点温度需要「后台弹出界面」已开启，否则 MIUI 会静默丢弃后台进程发起的页面跳转；纯经典蓝牙耳机没有 GATT 服务可读，有些耳机只在自己的私有通道里报电量，所以芯片可能只有图标没有数字——把诊断那行发我，我能判断你属于哪种；Open-Meteo 的地理编码没有收录国内每一个区，所以界面上会把解析结果显示出来让你自己核对；短信卡片打开的是会话，不是某一条。只访问四个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

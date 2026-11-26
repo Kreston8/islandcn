@@ -17,6 +17,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
@@ -108,6 +109,8 @@ final class BtWatcher extends BroadcastReceiver {
         } catch (Throwable ignored) {
             // Registration can fail in a restricted profile; the chips then show icons only.
         }
+        // Warm the device list through the public profile proxies; the answer is cached.
+        refreshLinked(context);
     }
 
     void stop(Context context) {
@@ -162,41 +165,205 @@ final class BtWatcher extends BroadcastReceiver {
         return watcher.build(context, false);
     }
 
+    /** Last list the profile proxies reported: BLE/classic address -> display name. */
+    private static final Map<String, String> LINKED = new LinkedHashMap<String, String>();
+    private static long linkedAt;
+    /** When the sweep below started, so a proxy that never answers cannot wedge it forever. */
+    private static long linkingSince;
+    private static boolean linking;
+
+    /**
+     * Refreshes {@link #LINKED} through the public profile proxies.
+     *
+     * <p>The hidden {@code BluetoothManager.getConnectedDevices(int)} is what this class used to
+     * call, and Android 12+ is free to refuse it — which is why the device list came back empty on
+     * a phone that was plainly playing music over A2DP. The proxies below are the supported way in,
+     * and they answer on the main thread a moment later, so the answer is cached.
+     */
+    static void refreshLinked(Context context) {
+        if (linking) {
+            if (linkingSince != 0L
+                    && android.os.SystemClock.elapsedRealtime() - linkingSince > 15000L) {
+                // A callback never came back: start over instead of staying empty for good.
+                linking = false;
+            } else {
+                return;
+            }
+        }
+        if (linkedAt != 0L && android.os.SystemClock.elapsedRealtime() - linkedAt < 8000L) {
+            return;
+        }
+        final Context app = context.getApplicationContext() == null
+                ? context : context.getApplicationContext();
+        BluetoothAdapter adapter;
+        try {
+            BluetoothManager manager =
+                    (BluetoothManager) app.getSystemService(Context.BLUETOOTH_SERVICE);
+            adapter = manager == null ? null : manager.getAdapter();
+        } catch (Throwable failure) {
+            adapter = null;
+        }
+        if (adapter == null) {
+            return;
+        }
+        final BluetoothAdapter open = adapter;
+        boolean started;
+        try {
+            started = open.isEnabled();
+        } catch (Throwable failure) {
+            started = false;
+        }
+        if (!started) {
+            return;
+        }
+        linking = true;
+        linkingSince = android.os.SystemClock.elapsedRealtime();
+        LINKED.clear();
+        askProfile(app, open, new int[]{BluetoothProfile.A2DP, BluetoothProfile.HEADSET,
+                BluetoothProfile.GATT}, 0);
+    }
+
+    /** Walks the profile list one proxy at a time; each callback asks for the next. */
+    private static void askProfile(final Context app, final BluetoothAdapter adapter,
+            final int[] profiles, final int index) {
+        if (index >= profiles.length) {
+            linking = false;
+            linkedAt = android.os.SystemClock.elapsedRealtime();
+            return;
+        }
+        final int profile = profiles[index];
+        BluetoothProfile.ServiceListener listener = new BluetoothProfile.ServiceListener() {
+            @Override
+            public void onServiceConnected(int connected, BluetoothProfile proxy) {
+                try {
+                    for (BluetoothDevice device : proxy.getConnectedDevices()) {
+                        String address = addressOf(device);
+                        if (address.isEmpty()) {
+                            continue;
+                        }
+                        LINKED.put(address, deviceName(device));
+                    }
+                } catch (Throwable ignored) {
+                    // Permission refused or the stack is gone; the next profile may still answer.
+                }
+                try {
+                    adapter.closeProfileProxy(profile, proxy);
+                } catch (Throwable ignored) {
+                    // Already closed.
+                }
+                askProfile(app, adapter, profiles, index + 1);
+            }
+
+            @Override
+            public void onServiceDisconnected(int disconnected) {
+                askProfile(app, adapter, profiles, index + 1);
+            }
+        };
+        try {
+            if (!adapter.getProfileProxy(app, listener, profile)) {
+                askProfile(app, adapter, profiles, index + 1);
+            }
+        } catch (Throwable failure) {
+            askProfile(app, adapter, profiles, index + 1);
+        }
+    }
+
     /**
      * {@code [address, name]} for every connected accessory, so the settings screen can offer one
      * switch per device. An empty list means no adapter, no permission, or nothing connected.
+     *
+     * <p>Three sources are merged and each address is reported once: the hidden
+     * {@code getConnectedDevices(int)} call, the answer the public profile proxies left in
+     * {@link #LINKED}, and a bonded device this class already holds a level for — a level only comes
+     * from a live link, so such a device is online even when no profile call answered.
      */
     static List<String[]> connected(Context context) {
         List<String[]> out = new ArrayList<>();
+        Map<String, String> found = new LinkedHashMap<>();
+        BtWatcher watcher = new BtWatcher();
+        BluetoothAdapter adapter = null;
         try {
+            watcher.load(context);
             BluetoothManager manager =
                     (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
-            if (manager == null) {
-                return out;
+            if (manager != null) {
+                adapter = manager.getAdapter();
             }
-            BluetoothAdapter adapter = manager.getAdapter();
-            if (adapter == null || !adapter.isEnabled()) {
-                return out;
-            }
-            Map<String, BluetoothDevice> devices = new LinkedHashMap<>();
-            collect(manager, BluetoothProfile.GATT, devices);
-            collect(manager, BluetoothProfile.HEADSET, devices);
-            // TWS earbuds often only register A2DP, so skipping this profile hid them entirely.
-            collect(manager, BluetoothProfile.A2DP, devices);
-            BtWatcher watcher = new BtWatcher();
-            watcher.load(context);
-            for (BluetoothDevice device : devices.values()) {
-                if (device == null) {
-                    continue;
-                }
-                String address = addressOf(device);
-                if (!address.isEmpty()) {
-                    out.add(new String[]{address, watcher.nameOf(context, device, address)});
+            if (adapter != null && !adapter.isEnabled()) {
+                // Bluetooth off: the cached answer is stale, so it must not be shown.
+                LINKED.clear();
+            } else if (adapter != null) {
+                Map<String, BluetoothDevice> devices = new LinkedHashMap<>();
+                collect(manager, BluetoothProfile.GATT, devices);
+                collect(manager, BluetoothProfile.HEADSET, devices);
+                // TWS earbuds often only register A2DP, so skipping this profile hid them entirely.
+                collect(manager, BluetoothProfile.A2DP, devices);
+                for (BluetoothDevice device : devices.values()) {
+                    if (device == null) {
+                        continue;
+                    }
+                    String address = addressOf(device);
+                    if (!address.isEmpty() && !found.containsKey(address)) {
+                        found.put(address, watcher.nameOf(context, device, address));
+                    }
                 }
             }
         } catch (Throwable ignored) {
             // No permission or no Bluetooth stack: the settings screen shows its hint instead.
         }
+        // Second path: what the public profile proxies last reported, names included.
+        try {
+            for (Map.Entry<String, String> entry : LINKED.entrySet()) {
+                String address = entry.getKey();
+                if (address == null || address.isEmpty() || found.containsKey(address)) {
+                    continue;
+                }
+                String name = entry.getValue();
+                if (name == null || name.trim().isEmpty()) {
+                    BluetoothDevice device = null;
+                    try {
+                        device = adapter == null ? null : adapter.getRemoteDevice(address);
+                    } catch (Throwable failure) {
+                        device = null;
+                    }
+                    name = device == null
+                            ? watcher.names.get(address)
+                            : watcher.nameOf(context, device, address);
+                }
+                if (name == null || name.trim().isEmpty()) {
+                    name = context.getString(R.string.bt_unknown);
+                }
+                found.put(address, name);
+            }
+        } catch (Throwable ignored) {
+            // A dying stack only costs the names.
+        }
+        // Third path: a bonded device with a cached level was online when that level arrived.
+        if (adapter != null) {
+            try {
+                for (BluetoothDevice device : adapter.getBondedDevices()) {
+                    if (device == null) {
+                        continue;
+                    }
+                    String address = addressOf(device);
+                    if (address.isEmpty() || found.containsKey(address)) {
+                        continue;
+                    }
+                    Integer known = watcher.levels.get(address);
+                    if (known == null || known < 0) {
+                        continue;
+                    }
+                    found.put(address, watcher.nameOf(context, device, address));
+                }
+            } catch (Throwable ignored) {
+                // The bonded list needs BLUETOOTH_CONNECT on Android 12+ as well.
+            }
+        }
+        for (Map.Entry<String, String> entry : found.entrySet()) {
+            out.add(new String[]{entry.getKey(), entry.getValue()});
+        }
+        // Warms the cache for the next call; it throttles itself to one sweep every eight seconds.
+        refreshLinked(context);
         return out;
     }
 
@@ -213,6 +380,13 @@ final class BtWatcher extends BroadcastReceiver {
      * free, and a GATT ask would cost the accessory a link.
      */
     public static String probe(Context context) {
+        String permissions = "权限 CONNECT="
+                + (granted(context, android.Manifest.permission.BLUETOOTH_CONNECT) ? "有" : "无")
+                + " SCAN="
+                + (granted(context, android.Manifest.permission.BLUETOOTH_SCAN) ? "有" : "无");
+        // A diagnostic is also a good moment to warm the proxy cache for the next redraw.
+        refreshLinked(context);
+
         BluetoothManager manager;
         try {
             manager = (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
@@ -220,7 +394,7 @@ final class BtWatcher extends BroadcastReceiver {
             manager = null;
         }
         if (manager == null) {
-            return "无蓝牙服务";
+            return permissions + "\n无蓝牙服务";
         }
         BluetoothAdapter adapter;
         try {
@@ -229,14 +403,14 @@ final class BtWatcher extends BroadcastReceiver {
             adapter = null;
         }
         if (adapter == null) {
-            return "无蓝牙适配器";
+            return permissions + "\n无蓝牙适配器";
         }
         try {
             if (!adapter.isEnabled()) {
-                return "蓝牙已关闭";
+                return permissions + "\n蓝牙已关闭";
             }
         } catch (Throwable failure) {
-            return "蓝牙状态不可读：缺 BLUETOOTH_CONNECT";
+            return permissions + "\n蓝牙状态不可读：缺 BLUETOOTH_CONNECT";
         }
         BtWatcher watcher = new BtWatcher();
         watcher.load(context);
@@ -268,9 +442,12 @@ final class BtWatcher extends BroadcastReceiver {
             }
         }
         if (devices.isEmpty()) {
-            return "蓝牙已开启，无已连接设备";
+            return permissions + "\n蓝牙已开启，无已连接设备（代理缓存 " + LINKED.size() + "）"
+                    + "\n列表来源 " + (LINKED.isEmpty() ? "隐藏接口/已配对" : "profile 代理");
         }
-        StringBuilder out = new StringBuilder("已连接 " + devices.size() + " 台");
+        StringBuilder out = new StringBuilder(permissions);
+        out.append('\n').append("已连接 ").append(devices.size())
+                .append(" 台（代理缓存 ").append(LINKED.size()).append("）");
         for (BluetoothDevice device : devices.values()) {
             String address = addressOf(device);
             String name = watcher.nameOf(context, device, address);
@@ -283,7 +460,21 @@ final class BtWatcher extends BroadcastReceiver {
                     .append(" | 系统 ").append(system < 0 ? "无" : system + "%")
                     .append(" | BLE 地址 ").append(twin == null || twin.isEmpty() ? "未扫描" : twin);
         }
+        out.append("\n列表来源 ")
+                .append(LINKED.isEmpty() ? "隐藏接口/已配对" : "profile 代理");
         return out.toString();
+    }
+
+    /** True when a runtime Bluetooth permission is held; before Android 12 there were none. */
+    private static boolean granted(Context context, String permission) {
+        try {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+                return true;
+            }
+            return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+        } catch (Throwable failure) {
+            return false;
+        }
     }
 
     /** The connection type as the diagnostics line spells it. */

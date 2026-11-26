@@ -93,68 +93,66 @@ public final class MainActivity extends Activity {
         addFill(root, subtitleBox, 8);
         titleRow.addView(helpButton(R.string.setup_subtitle, subtitleBox), helpParams());
 
-        LinearLayout overlayCard = card();
-        helpHeader(overlayCard, R.string.perm_overlay_title,
-                text(R.string.perm_overlay_desc, 13f, COLOR_SECONDARY, false));
-        overlayState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(overlayCard, overlayState, 10);
-        addTop(overlayCard, button(R.string.grant, v -> Perms.openOverlaySettings(this)), 12);
-        addFill(root, overlayCard, 24);
+        LinearLayout overlayCard = permCard(R.string.perm_overlay_title, R.string.perm_overlay_desc, 0,
+                v -> Perms.openOverlaySettings(this));
+        overlayState = permState(overlayCard, R.string.missing);
+        addFill(root, overlayCard, 14);
 
-        LinearLayout accessCard = card();
-        helpHeader(accessCard, R.string.perm_access_title,
-                text(R.string.perm_access_desc, 13f, COLOR_SECONDARY, false));
-        accessState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(accessCard, accessState, 10);
-        addTop(accessCard, button(R.string.grant, v -> Perms.openNotificationAccessSettings(this)), 12);
-        addFill(root, accessCard, 14);
+        LinearLayout accessCard = permCard(R.string.perm_access_title, R.string.perm_access_desc, 0,
+                v -> Perms.openNotificationAccessSettings(this));
+        accessState = permState(accessCard, R.string.missing);
+        addFill(root, accessCard, 10);
 
-        LinearLayout smsCard = card();
-        helpHeader(smsCard, R.string.perm_sms_title,
-                text(R.string.perm_sms_desc, 13f, COLOR_SECONDARY, false));
-        smsState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(smsCard, smsState, 10);
-        addTop(smsCard, button(R.string.grant, v -> requestSms()), 12);
-        addFill(root, smsCard, 14);
+        LinearLayout smsCard = permCard(R.string.perm_sms_title, R.string.perm_sms_desc, 0,
+                v -> requestSms());
+        smsState = permState(smsCard, R.string.missing);
+        addFill(root, smsCard, 10);
 
-        LinearLayout phoneCard = card();
-        helpHeader(phoneCard, R.string.perm_phone_title,
-                text(R.string.perm_phone_desc, 13f, COLOR_SECONDARY, false));
-        phoneState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(phoneCard, phoneState, 10);
-        addTop(phoneCard, button(R.string.grant, v -> requestPhone()), 12);
-        addFill(root, phoneCard, 14);
+        LinearLayout phoneCard = permCard(R.string.perm_phone_title, R.string.perm_phone_desc, 0,
+                v -> requestPhone());
+        phoneState = permState(phoneCard, R.string.missing);
+        addFill(root, phoneCard, 10);
 
-        LinearLayout usageCard = card();
-        helpHeader(usageCard, R.string.perm_usage_title,
-                text(R.string.perm_usage_desc, 13f, COLOR_SECONDARY, false));
-        usageState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(usageCard, usageState, 10);
-        addTop(usageCard, button(R.string.grant, v -> Perms.openUsageAccessSettings(this)), 12);
-        addFill(root, usageCard, 14);
+        LinearLayout usageCard = permCard(R.string.perm_usage_title, R.string.perm_usage_desc, 0,
+                v -> Perms.openUsageAccessSettings(this));
+        usageState = permState(usageCard, R.string.missing);
+        addFill(root, usageCard, 10);
 
-        LinearLayout btCard = card();
-        helpHeader(btCard, R.string.perm_bt_title,
-                text(R.string.perm_bt_desc, 13f, COLOR_SECONDARY, false));
-        btState = text(R.string.missing, 13f, COLOR_MISSING, true);
-        addFill(btCard, btState, 10);
+        LinearLayout btCard = permCard(R.string.perm_bt_title, R.string.perm_bt_desc, R.string.bt_hint,
+                v -> requestBluetooth());
+        btState = permState(btCard, R.string.missing);
         btDiagView = new TextView(this);
         btDiagView.setTextSize(12f);
         btDiagView.setTextColor(0xFF8A8A94);
         btDiagView.setLineSpacing(dp(3), 1f);
-        addFill(btCard, btDiagView, 4);
-        addTop(btCard, button(R.string.grant, v -> requestBluetooth()), 12);
-        addFill(btCard, text(R.string.bt_hint, 12f, 0xFF8A8A94, false), 8);
-        addFill(root, btCard, 14);
+        addFill(btCard, btDiagView, 6);
+        addFill(root, btCard, 10);
 
         LinearLayout serviceCard = card();
-        addFill(serviceCard, text(R.string.state_title, 16f, COLOR_PRIMARY, true), 0);
+        LinearLayout serviceRow = new LinearLayout(this);
+        serviceRow.setOrientation(LinearLayout.HORIZONTAL);
+        serviceRow.setGravity(Gravity.CENTER_VERTICAL);
+        serviceRow.addView(text(R.string.state_title, 16f, COLOR_PRIMARY, true),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
         serviceState = text(R.string.service_off, 13f, COLOR_IDLE, true);
-        addFill(serviceCard, serviceState, 8);
-        startStop = button(R.string.start, v -> toggleService());
-        addTop(serviceCard, startStop, 12);
-        addTop(serviceCard, button(R.string.preview, v -> preview()), 8);
-        addFill(root, serviceCard, 14);
+        LinearLayout.LayoutParams stateParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        stateParams.leftMargin = dp(10);
+        serviceRow.addView(serviceState, stateParams);
+        startStop = inlineButton(R.string.start, v -> toggleService());
+        serviceRow.addView(startStop, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        addFill(serviceCard, serviceRow, 0);
+        LinearLayout previewRow = new LinearLayout(this);
+        previewRow.setOrientation(LinearLayout.HORIZONTAL);
+        previewRow.setGravity(Gravity.CENTER_VERTICAL);
+        previewRow.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        previewRow.addView(smallButton(R.string.preview, v -> preview()),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        addFill(serviceCard, previewRow, 10);
+        addFill(root, serviceCard, 10);
 
         LinearLayout keepCard = card();
         TextView keepDesc = text("MIUI 上要让岛一直活着，需要三步：①「自启动」里允许本 App；"
@@ -178,7 +176,7 @@ public final class MainActivity extends Activity {
         keepRow.addView(appButton, new LinearLayout.LayoutParams(
                 0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
         addFill(keepCard, keepRow, 12);
-        addFill(root, keepCard, 14);
+        addFill(root, keepCard, 10);
 
         LinearLayout featuresCard = card();
         addFill(featuresCard, text(R.string.settings_title, 16f, COLOR_PRIMARY, true), 0);
@@ -198,7 +196,7 @@ public final class MainActivity extends Activity {
         primaryRow(rows, R.string.label_bt, Prefs.KEY_BT, true, this::bluetoothRows);
         addFill(featuresCard, text(R.string.music_hint, 12f, 0xFF8A8A94, false), 12);
         addFill(featuresCard, text(R.string.lyrics_hint, 12f, 0xFF8A8A94, false), 6);
-        addFill(root, featuresCard, 14);
+        addFill(root, featuresCard, 10);
 
         LinearLayout lookCard = card();
         addFill(lookCard, text(R.string.look_title, 16f, COLOR_PRIMARY, true), 0);
@@ -237,7 +235,7 @@ public final class MainActivity extends Activity {
         alphaValue = text(R.string.look_alpha, 12f, 0xFF8A8A94, false);
         alphaValue.setText(getString(R.string.look_alpha_fmt, Look.percent(this)));
         addFill(lookCard, alphaValue, 2);
-        addFill(root, lookCard, 14);
+        addFill(root, lookCard, 10);
 
         LinearLayout standbyCard = card();
         addFill(standbyCard, text(R.string.label_standby, 16f, COLOR_PRIMARY, true), 0);
@@ -260,7 +258,7 @@ public final class MainActivity extends Activity {
         updateCity();
         addFill(standbyCard, text(R.string.weather_city_desc, 12f, 0xFF8A8A94, false), 10);
         addFill(standbyCard, text(R.string.standby_need_usage, 12f, 0xFF8A8A94, false), 6);
-        addFill(root, standbyCard, 14);
+        addFill(root, standbyCard, 10);
 
         TextView miui = text(R.string.miui_hint, 12f, 0xFF8A8A94, false);
         miui.setLineSpacing(dp(3), 1f);
@@ -772,6 +770,67 @@ public final class MainActivity extends Activity {
         button.setPadding(dp(10), dp(4), dp(10), dp(4));
         return button;
     }
+
+    /** A slim button that fits on a card's title line: 12sp, tight padding, no minimum size. */
+    private Button inlineButton(int resId, View.OnClickListener listener) {
+        Button button = button(resId, listener);
+        button.setTextSize(12f);
+        button.setPadding(dp(12), dp(5), dp(12), dp(5));
+        button.setMinWidth(0);
+        button.setMinimumWidth(0);
+        button.setMinHeight(0);
+        button.setMinimumHeight(0);
+        button.setIncludeFontPadding(false);
+        return button;
+    }
+
+    /**
+     * One permission card in two lines: "标题" then its "?" right beside it, with 去授权 pinned to
+     * the right edge of the same row, then the status line. The small print still folds away.
+     *
+     * @param extraRes a second paragraph to put in the fold box, or 0 for none
+     */
+    private LinearLayout permCard(int titleRes, int descRes, int extraRes, View.OnClickListener grant) {
+        LinearLayout cardBox = card();
+        LinearLayout body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.addView(text(descRes, 13f, COLOR_SECONDARY, false),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        if (extraRes != 0) {
+            TextView extra = text(extraRes, 12f, 0xFF8A8A94, false);
+            extra.setLineSpacing(dp(3), 1f);
+            LinearLayout.LayoutParams extraParams = new LinearLayout.LayoutParams(
+                    LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
+            extraParams.topMargin = dp(6);
+            body.addView(extra, extraParams);
+        }
+        LinearLayout box = foldBox(titleRes, body);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text(titleRes, 16f, COLOR_PRIMARY, true),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        LinearLayout.LayoutParams toggleParams = helpParams();
+        toggleParams.leftMargin = dp(6);
+        row.addView(helpButton(titleRes, box), toggleParams);
+        row.addView(new View(this), new LinearLayout.LayoutParams(0, 1, 1f));
+        row.addView(inlineButton(R.string.grant, grant),
+                new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
+                        LinearLayout.LayoutParams.WRAP_CONTENT));
+        addFill(cardBox, row, 0);
+        addFill(cardBox, box, 6);
+        return cardBox;
+    }
+
+    /** The one-line permission status, added straight under a card's title row. */
+    private TextView permState(LinearLayout cardBox, int resId) {
+        TextView state = text(resId, 13f, COLOR_MISSING, true);
+        addFill(cardBox, state, 8);
+        return state;
+    }
+
     /** The round grey "?" that unfolds the small print belonging to one title. */
     private View helpButton(final int key, final View body) {
         TextView toggle = new TextView(this);
@@ -911,7 +970,7 @@ public final class MainActivity extends Activity {
         LinearLayout layout = new LinearLayout(this);
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setBackground(rounded(COLOR_CARD, 18f));
-        layout.setPadding(dp(16), dp(16), dp(16), dp(16));
+        layout.setPadding(dp(14), dp(14), dp(14), dp(14));
         return layout;
     }
 

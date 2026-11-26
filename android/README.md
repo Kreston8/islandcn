@@ -1,4 +1,4 @@
-# islandcn 灵动岛 for Android
+# 岛仔 for Android
 
 English | [中文说明](README.zh.md)
 
@@ -330,7 +330,7 @@ APK and attaches it to a GitHub release.
 1. Download the `.apk` from the release assets.
 2. Allow installs from unknown sources for the app you download with (MIUI: 设置 → 应用设置 →
    特殊权限 → 安装未知应用).
-3. Open the app, grant the permissions, press 启动灵动岛, then 预览效果.
+3. Open the app, grant the permissions, press 启动岛仔, then 预览效果.
 
 ## Version numbers
 

@@ -3,6 +3,7 @@ package com.kreston8.islandcn;
 import android.animation.ValueAnimator;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
+import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
 import android.content.ClipData;
@@ -254,40 +255,89 @@ final class StandbyView extends FrameLayout {
     }
 
     /**
-     * Opens the weather app, because a temperature on the desktop is a button, not decoration.
+     * Opens the phone's own weather app.
      *
-     * <p>MIUI's own weather app is tried first, then the usual vendor packages, then the web page.
-     * Nothing here needs a permission.
+     * <p>A package lookup alone is not enough on MIUI: the activity is there but
+     * getLaunchIntentForPackage() can come back empty, so the known MIUI components are tried by
+     * name first. Only when nothing at all can be started does this fall back to the web page.
      */
     private void openWeather() {
-        String[] known = {
-                "com.miui.weather2",
-                "com.miui.weather",
-                "com.huawei.android.totemweather",
-                "com.coloros.weather2",
-                "com.android.weather",
-        };
-        for (String name : known) {
-            try {
-                Intent launch = getContext().getPackageManager().getLaunchIntentForPackage(name);
-                if (launch != null) {
-                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    getContext().startActivity(launch);
-                    return;
-                }
-            } catch (Throwable ignored) {
-                // Try the next package.
-            }
+        if (startWeather(new ComponentName("com.miui.weather2", "com.miui.weather2.ActivityWeatherMain"))
+                || startWeather(new ComponentName("com.miui.weather2", "com.miui.weather2.WeatherMainActivity"))
+                || startWeather(new ComponentName("com.miui.weather2", "com.miui.weather2.MainActivity"))
+                || startWeather(new ComponentName("com.miui.weather", "com.miui.weather.ActivityWeatherMain"))
+                || startWeatherPackage("com.miui.weather2")
+                || startWeatherPackage("com.miui.weather")
+                || startWeatherByLabel()
+                || startWeatherPackage("com.huawei.android.totemweather")
+                || startWeatherPackage("com.coloros.weather2")
+                || startWeatherPackage("com.android.weather")) {
+            return;
         }
         try {
-            Intent web = new Intent(Intent.ACTION_VIEW, Uri.parse("https://weather.miui.com"));
-            web.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            getContext().startActivity(web);
-            return;
+            Intent page = new Intent(Intent.ACTION_VIEW, Uri.parse("https://weather.miui.com"))
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            getContext().startActivity(page);
         } catch (Throwable ignored) {
-            // No browser either.
+            Toast.makeText(getContext(), R.string.weather_no_app, Toast.LENGTH_LONG).show();
         }
-        Toast.makeText(getContext(), R.string.weather_no_app, Toast.LENGTH_SHORT).show();
+    }
+
+    /** Starts one explicit weather activity; false when the component is absent or blocked. */
+    private boolean startWeather(ComponentName component) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_MAIN)
+                    .addCategory(Intent.CATEGORY_LAUNCHER)
+                    .setComponent(component)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            getContext().startActivity(intent);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Starts an app by package name through its launcher intent. */
+    private boolean startWeatherPackage(String pkg) {
+        try {
+            Intent intent = getContext().getPackageManager().getLaunchIntentForPackage(pkg);
+            if (intent == null) {
+                return false;
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            getContext().startActivity(intent);
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /**
+     * Last non-web resort: take the first launcher entry whose label says weather.
+     *
+     * <p>This is what catches the app when its package name is an OEM name nobody can spell.
+     */
+    private boolean startWeatherByLabel() {
+        try {
+            PackageManager pm = getContext().getPackageManager();
+            Intent probe = new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER);
+            for (ResolveInfo info : pm.queryIntentActivities(probe, 0)) {
+                if (info == null || info.activityInfo == null) {
+                    continue;
+                }
+                CharSequence label = info.loadLabel(pm);
+                String name = label == null ? "" : label.toString().toLowerCase(Locale.ROOT);
+                if (!name.contains("天气") && !name.contains("weather")) {
+                    continue;
+                }
+                if (startWeather(new ComponentName(info.activityInfo.packageName, info.activityInfo.name))) {
+                    return true;
+                }
+            }
+        } catch (Throwable ignored) {
+            return false;
+        }
+        return false;
     }
 
     boolean hasContent() {

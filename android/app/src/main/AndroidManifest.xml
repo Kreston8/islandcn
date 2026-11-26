@@ -44,6 +44,21 @@
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
 
+    <!-- Android 11+ hides other apps unless they are declared here. Without this block
+         getLaunchIntentForPackage("com.miui.weather2") answers null and the temperature tap ends up
+         in a browser, which is exactly what it used to do on MIUI 14. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="com.miui.weather2" />
+        <package android:name="com.miui.weather" />
+        <package android:name="com.huawei.android.totemweather" />
+        <package android:name="com.coloros.weather2" />
+        <package android:name="com.android.weather" />
+    </queries>
+
     <application
         android:allowBackup="false"
         android:hardwareAccelerated="true"
