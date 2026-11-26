@@ -8,6 +8,11 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- The island has to come back after a reboot, not only after the app is opened again. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <!-- Offered from the settings screen: an exempt app may restart its own service from a
+         background alarm, which is the only way to survive an aggressive MIUI killer. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- Verification and pickup codes straight from the message, not the messaging app. -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <!-- Call cards. The number needs READ_PHONE_STATE; the platform only hands it out below 12. -->
@@ -27,8 +32,14 @@
     <uses-permission android:name="android.permission.INTERNET" />
 
     <!-- Accessory names and the connected-device list. BLUETOOTH_CONNECT is a runtime grant on
-         Android 12+; the legacy permission covers the versions before it. -->
+         Android 12+; the legacy permission covers the versions before it. BLUETOOTH_SCAN is only
+         used to find the BLE address of a pair of earbuds whose classic address refuses a GATT
+         connection, and it never leaves the phone. -->
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
     <uses-permission
         android:name="android.permission.BLUETOOTH"
         android:maxSdkVersion="30" />
@@ -54,7 +65,9 @@
         <service
             android:name=".IslandService"
             android:exported="false"
-            android:foregroundServiceType="specialUse">
+            android:foregroundServiceType="specialUse"
+            android:stopWithTask="false">
+
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Shows notification content in an island overlay above other apps." />
@@ -82,6 +95,20 @@
         <receiver
             android:name=".AlarmWatcher"
             android:exported="false" />
+
+        <!-- Restores the island after a reboot, after an update, and fifteen minutes after the
+             system killed the process. BOOT_COMPLETED is a protected broadcast, so exposing the
+             receiver cannot be abused by other apps. -->
+        <receiver
+            android:name=".KeepAlive"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

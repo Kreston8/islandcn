@@ -258,12 +258,18 @@ courier is kept rather than dropped. Outside that card:
 5. **Usage access** (`PACKAGE_USAGE_STATS`), optional but required for the desktop-only rule and for
    the standby pill: it is how the app knows the launcher is in front. One cheap query every 2.5 s
    while a track plays, and one every 4 s while the standby pill is active.
-6. **Nearby devices** (`BLUETOOTH_CONNECT`), optional and only asked for on Android 12+, for the names
-   and the connected-device list behind the battery chips.
+6. **Nearby devices** (`BLUETOOTH_CONNECT`, plus `BLUETOOTH_SCAN` with `neverForLocation` on Android
+   12+), optional, for the names, the connected-device list and the short BLE twin scan behind the
+   battery chips.
 7. On MIUI / HyperOS also enable **后台弹出界面** for this app, otherwise the system drops overlays
    started from the background.
 8. Android 13+ asks for `POST_NOTIFICATIONS` so the foreground service can show its status
    notification.
+9. **Battery optimisation** (`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`, optional), plus 自启动 and an
+   unrestricted 省电策略 in the MIUI app page. Android 12+ refuses to start a foreground service from
+   the background, so the 15-minute watchdog can only bring the island back while the app is exempt.
+   The 后台常驻 card in Settings shows the state and opens both screens; `RECEIVE_BOOT_COMPLETED`
+   (no prompt) is what restores the island after a reboot, and only if you had it running.
 
 ## What it is not
 

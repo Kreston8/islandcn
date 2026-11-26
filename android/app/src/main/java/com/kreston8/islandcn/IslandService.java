@@ -59,6 +59,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
     private static final long ALARM_HOLD_MS = 5000L;
     /** How long an upward swipe keeps the notification card in front of the lyric line. */
     private static final long HOLD_OPEN_MS = 60_000L;
+    /** How long a long-press swipe silences everything, including the standby pill. */
+    private static final long HIDE_MS = 180_000L;
 
     /** Moment the pill may come back after a long-press swipe hid it; 0 when it is not hidden. */
     private long hideUntil;
@@ -172,6 +174,22 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         IslandBridge.attach(this);
     }
 
+    /**
+     * The settings screen was swiped out of the recent tasks.
+     *
+     * <p>Nothing is torn down here on purpose. The island lives in a foreground service with
+     * {@code stopWithTask="false"}; only the activity is gone, so dropping the windows here would
+     * turn "close the app" into "the island is dead until the app is opened again". The watchdog
+     * alarm is re-armed as a second line of defence for the vendor killer.
+     */
+    @Override
+    public void onTaskRemoved(Intent rootIntent) {
+        if (running) {
+            KeepAlive.start(this);
+        }
+        super.onTaskRemoved(rootIntent);
+    }
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         // A look change repaints both windows on the spot: the standby pill would otherwise keep the
@@ -188,13 +206,21 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             }
         }
         if (intent != null && ACTION_STOP.equals(intent.getAction())) {
+            Prefs.setRunning(this, false);
+            KeepAlive.stop(this);
             stopSelf();
             return START_NOT_STICKY;
         }
         startInForeground();
         running = true;
+        // Remembered for the reboot path and for the watchdog: only a deliberate stop clears it.
+        Prefs.setRunning(this, true);
+        KeepAlive.start(this);
         if (!Perms.canOverlay(this)) {
             Toast.makeText(this, R.string.need_overlay, Toast.LENGTH_LONG).show();
+            // No overlay permission means no island, so a watchdog restart would loop forever.
+            Prefs.setRunning(this, false);
+            KeepAlive.stop(this);
             stopSelf();
             return START_NOT_STICKY;
         }
@@ -446,6 +472,8 @@ public final class IslandService extends Service implements IslandBridge.Sink {
             return false;
         }
         StandbyView view = new StandbyView(this);
+        // Long press, then an upward swipe on the pill itself: the same gesture the card has.
+        view.setHideAction(() -> hideFor(HIDE_MS));
         WindowManager.LayoutParams params = new WindowManager.LayoutParams();
         params.width = WindowManager.LayoutParams.WRAP_CONTENT;
         params.height = WindowManager.LayoutParams.WRAP_CONTENT;
@@ -680,6 +708,9 @@ public final class IslandService extends Service implements IslandBridge.Sink {
         handler.removeCallbacks(hideTask);
         handler.postDelayed(hideTask, span);
         hideIsland();
+        applyStandbyVisibility();
+        // Without this the gesture looks like a miss: the pill is simply gone and nothing said why.
+        Toast.makeText(this, R.string.hidden_temporarily, Toast.LENGTH_SHORT).show();
     }
 
     private void openCurrent() {

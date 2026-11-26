@@ -23,7 +23,8 @@ import java.util.concurrent.Executors;
  * <p>The player itself never publishes lyrics, so the lines and their timestamps have to be looked
  * up by title and artist. Everything is bounded: one request at a time on a daemon thread, six
  * second timeouts, a 512 KB reply cap, a sixteen track memory cache and no disk writes at all. When
- * the request fails the card simply keeps showing the text the player publishes.
+ * the request fails the card simply keeps showing the text the player publishes, and the failure is
+ * not remembered, so a later attempt for the same track can still fill the lines in.
  */
 final class LyricSource {
 
@@ -83,8 +84,13 @@ final class LyricSource {
                 } catch (Throwable ignored) {
                     lyric = Lyric.empty();
                 }
-                synchronized (CACHE) {
-                    CACHE.put(key, lyric);
+                // A failure or an empty answer is not a fact about the song, so it is not cached:
+                // one dropped request would otherwise leave this track lyric-less for the whole
+                // life of the process, because the next get() hits the cache and returns nothing.
+                if (cacheable(lyric)) {
+                    synchronized (CACHE) {
+                        CACHE.put(key, lyric);
+                    }
                 }
                 final Lyric result = lyric;
                 main.post(new Runnable() {
@@ -95,6 +101,11 @@ final class LyricSource {
                 });
             }
         });
+    }
+
+    /** True for a real lyric, which is the only kind of answer worth remembering. */
+    private static boolean cacheable(Lyric lyric) {
+        return lyric != null && !lyric.isEmpty();
     }
 
     /** Releases the worker thread when nothing is playing; the cache stays. */

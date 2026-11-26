@@ -31,22 +31,32 @@ import java.util.Set;
  * <p>Cost discipline, because this runs for as long as the service does:
  * <ul>
  *   <li>Track changes arrive through {@link MediaController.Callback}; nothing is polled for them.
- *   <li>The only polling is "is the desktop in front", one cheap query every 2.5 s, and only while a
+ *   <li>The only polling is "is the desktop in front", one cheap query every 2.5 s, or every second
+ *       while a timed lyric is on the card so the karaoke line cannot drift, and only while a
  *       session is actually playing. It stops on pause, on screen off, and when the usage-access
  *       permission is missing.
- *   <li>One card is posted per track, not per second.
+ *   <li>One card is posted per track, not per second. A lookup that comes back empty is retried at
+ *       most every 15 s, so one dropped request cannot silence a whole song.
  * </ul>
  */
 final class MediaWatcher {
 
     private static final long POLL_MS = 2500L;
+    /**
+     * Tighter cadence while the card carries a timed lyric: the strip counts the position up on its
+     * own clock, so every millisecond of poll interval is a millisecond the karaoke line can drift
+     * against the player and jump a word or a line.
+     */
+    private static final long LYRIC_POLL_MS = 1000L;
+    /** How long an empty lyric answer is final: the lookup is retried once per window. */
+    private static final long LYRIC_RETRY_MS = 15_000L;
     /** Small window: we only need the most recent foreground change. */
     /** Small window: we only need the most recent foreground change. */
     private static final long WINDOW_MS = 8000L;
     /** The first look after start needs history, because a resting desktop emits no events at all. */
     private static final long PRIME_MS = 120_000L;
     /** How far the player's own clock may drift before the strip is re-anchored. */
-    private static final long DRIFT_MS = 700L;
+    private static final long DRIFT_MS = 400L;
     /** A playback-state stamp older than this is not a usable clock. */
     private static final long MAX_EXTRAPOLATE_MS = 120_000L;
 
@@ -69,6 +79,12 @@ final class MediaWatcher {
     private String lastTrack;
     private String lyricKey;
     private Lyric lyric;
+    /** True once a lookup for the current key has run and come back without a usable lyric. */
+    private boolean lyricAsked;
+    /** When that lookup was issued, so an empty answer is retried on a slow, bounded cadence. */
+    private long lyricTriedAt;
+    /** How many answers in a row carried nothing, which stretches the retry window. */
+    private int lyricMisses;
     private Set<String> homePackages;
     private String lastForeground;
     private long anchorPos;
@@ -158,6 +174,7 @@ final class MediaWatcher {
     void reset() {
         hide();
         lastTrack = null;
+        forgetLyric();
         refresh();
     }
 
@@ -244,6 +261,13 @@ final class MediaWatcher {
         if (shown && track.equals(lastTrack)) {
             // The strip stays up; this only checks that its karaoke clock still matches the player.
             resync(active);
+            if (lyric == null) {
+                // Nothing usable yet: lyricFor() retries on its own cadence, and the answer then
+                // forces the re-post that starts drawing the lines.
+                String nowSong = title == null ? "" : title.toString();
+                String nowSinger = artist == null ? "" : artist.toString();
+                lyricFor(LyricSource.keyOf(nowSong, nowSinger), nowSong, nowSinger);
+            }
             schedulePoll();
             return;
         }
@@ -277,9 +301,12 @@ final class MediaWatcher {
         shown = false;
         shownKey = null;
         lastTrack = null;
-        lyricKey = null;
-        lyric = null;
         anchorAt = 0L;
+        // The lyric and its retry bookkeeping are kept on purpose: both are keyed by track, so an
+        // answer that arrives while the card is hidden (another app in front, a notification cut in)
+        // still lands here and is drawn the moment the card comes back, instead of being looked up -
+        // and lost - again. They are forgotten by forgetLyric(), that is when the track changes or
+        // the feature is switched off.
     }
 
     private void schedulePoll() {
@@ -292,35 +319,83 @@ final class MediaWatcher {
             return;
         }
         polling = true;
-        handler.postDelayed(poll, POLL_MS);
+        handler.postDelayed(poll, lyric != null && !lyric.isEmpty() ? LYRIC_POLL_MS : POLL_MS);
     }
 
     /**
      * Lyric for this track, starting the lookup when it is not known yet.
      *
      * <p>Only one request runs at a time, so skipping through a playlist cannot pile up
-     * connections, and an answer for a track that is no longer playing is dropped.
+     * connections, and an answer for a track that is no longer playing is dropped. An empty answer
+     * is retried, but only once per {@link #LYRIC_RETRY_MS}, so one dropped request cannot leave the
+     * card without lines for the rest of the song.
      */
     private Lyric lyricFor(String key, String title, String artist) {
         if (!key.equals(lyricKey)) {
+            forgetLyric();
             lyricKey = key;
-            lyric = null;
-            if (Prefs.get(context, Prefs.KEY_LYRICS)) {
-                LyricSource.get(title, artist, this::onLyric);
+            requestLyric(title, artist);
+        } else if (lyric == null) {
+            // An answer that carried nothing is not final: retry it, backing off so a song with no
+            // subtitles anywhere does not keep asking every fifteen seconds on mobile data.
+            long now = SystemClock.elapsedRealtime();
+            if (!lyricAsked || now - lyricTriedAt >= retryDelay()) {
+                requestLyric(title, artist);
             }
         }
         return lyric;
     }
 
-    private void onLyric(String key, Lyric found) {
-        if (!key.equals(lyricKey) || !shown) {
-            // A late answer, or the track changed while the request was in flight.
+    /** 15 s, then 30 s, then a minute between attempts; a real answer clears the count. */
+    private long retryDelay() {
+        if (lyricMisses <= 1) {
+            return LYRIC_RETRY_MS;
+        }
+        return lyricMisses == 2 ? LYRIC_RETRY_MS * 2L : LYRIC_RETRY_MS * 4L;
+    }
+
+    /** Starts one lookup, unless the user turned timed lyrics off. */
+    private void requestLyric(String title, String artist) {
+        if (!Prefs.get(context, Prefs.KEY_LYRICS)) {
             return;
         }
-        lyric = plausible(found) ? found : Lyric.empty();
-        // Force exactly one re-post; the card key is unchanged so nothing re-expands.
-        lastTrack = null;
-        refresh();
+        lyricAsked = true;
+        lyricTriedAt = SystemClock.elapsedRealtime();
+        lyricMisses++;
+        LyricSource.get(title, artist, this::onLyric);
+    }
+
+    /** Forgets the remembered lyric, so the next card asks for its track again. */
+    private void forgetLyric() {
+        lyricKey = null;
+        lyric = null;
+        lyricAsked = false;
+        lyricTriedAt = 0L;
+        lyricMisses = 0;
+    }
+
+    private void onLyric(String key, Lyric found) {
+        if (!key.equals(lyricKey)) {
+            // The track changed while the request was in flight; the new one has its own lookup.
+            return;
+        }
+        // Stored even while the card is hidden: the key still matches this track, and an answer
+        // thrown away here is exactly what left the card without lines until the next track, as
+        // nothing else would ever ask for them again.
+        boolean usable = plausible(found);
+        lyric = usable ? found : null;
+        if (usable) {
+            // A real answer resets the backoff, so the next song starts from a quick retry again.
+            lyricMisses = 0;
+        }
+        // An empty answer only buys a pause; lyricFor() retries it on its own slow cadence.
+        lyricAsked = true;
+        lyricTriedAt = SystemClock.elapsedRealtime();
+        if (usable && shown) {
+            // Force exactly one re-post; the card key is unchanged so nothing re-expands.
+            lastTrack = null;
+            refresh();
+        }
     }
 
     /**

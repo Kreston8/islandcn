@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to create or update (leave empty for island-v2.12.<run number>)"
+        description: "Release tag to create or update (leave empty for island-v2.13.<run number>)"
         required: false
         default: ""
   push:
@@ -66,7 +66,7 @@ jobs:
         run: |
           gradle assembleRelease --no-daemon --stacktrace \
             -PversionCode="${{ github.run_number }}" \
-          -PversionName="2.12.${{ github.run_number }}"
+          -PversionName="2.13.${{ github.run_number }}"
 
       # Advisory only: the artifact is verified locally afterwards, this just says which key signed it.
       - name: Check the signing certificate
@@ -83,7 +83,7 @@ jobs:
         run: |
           mkdir -p dist
           cp android/app/build/outputs/apk/release/app-release.apk \
-          "dist/islandcn-island-2.12.${{ github.run_number }}.apk"
+          "dist/islandcn-island-2.13.${{ github.run_number }}.apk"
           ls -l dist
           unzip -l dist/*.apk | head -30
 
@@ -97,41 +97,33 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ inputs.tag }}"
-          if [ -z "$TAG" ]; then TAG="island-v2.12.${{ github.run_number }}"; fi
+          if [ -z "$TAG" ]; then TAG="island-v2.13.${{ github.run_number }}"; fi
           cat > notes.md <<'NOTES'
           ## English
 
           **What is new in this build**
-          - **The island no longer folds open and shut.** It is one pill, one height, and its width follows its text — longer for a delivery, shorter for a code. That removed the tap-to-expand card, the × button and the touch target that used to grow under your finger.
-          - **Gestures, in the order you meet them.** One tap opens the app. Two taps copy. Left swipe closes that card for good. A plain upward swipe pages through whatever is taking turns — several pickup codes, the newest notification, the desktop line, the lyric line. Long-press makes the pill shake, and an upward swipe from there hides it for three minutes; it comes back by itself.
-          - **Two taps copy only what is worth copying**: a pickup code (the code alone, without the 驿站 name around it) or the line of the day. Nothing else responds to it.
-          - **Closing is permanent.** A card you swipe away never comes back, not even after the service restarts. The one exception is a track: only the card on screen is dropped, because the next song should still show.
-          - **Do-not-disturb is respected.** While the phone is in DND, priority-only or silent, notifications, pickup codes, delivery, to-dos, calls and alarms stay off the pill. The desktop line and the lyrics are not affected, and nothing that was held back is replayed when the mode ends.
-          - **Cards that arrive while another app is in front are dropped as well**, and they do not reappear when you get back to the desktop. This uses 使用情况访问; without that permission the island behaves as it did before.
-          - **The clock app's own bedtime notices stay off the island.** They repeat what the alarm reminder already says.
-          - **Alarms remind three times: T-10, T-5 and T-1 minutes**, five seconds each, and then the pill goes back to the desktop line, or to the lyrics if a track is playing. After T nothing is shown, because the system clock rings on its own. A left swipe cancels the rest of that one alarm; tomorrow's alarm is untouched. Tapping an alarm card opens the clock app's alarm list.
-          - **The line of the day scrolls like a sign when it is too long**, and copying it copies the sentence alone — no temperature glued to the end.
-          - **Settings**: 附近设备 (Bluetooth) moved up next to the other four permissions; the colour swatches scroll sideways, so the last tint is finally reachable; and a diagnostics line under the Bluetooth card says which profiles an accessory is actually connected on and where its battery figure would come from. Earbuds that only register A2DP — Baseus Bowie M2 among them — now appear at all.
-          - The mascot's smiling eyes were drawn upside down. Fixed.
+          - **The island now survives leaving the app.** Closing the settings screen could take the island with it. The service is sticky, it keeps its window alive when the task is removed, and a 15-minute watchdog restarts it after a ROM has quietly killed it. It also comes back after a reboot or an update, but only if it was running when the app was last closed. A new card, 后台常驻, shows whether the app is exempt from battery optimisation and offers both switches: ignore battery optimisation, and the MIUI page for 自启动 / 省电策略.
+          - **A tidier Settings screen.** The long paragraph under the title and the six permission blurbs are folded away behind a round "?" button. The permission state itself still shows at a glance.
+          - **The smiling eyes were too close.** They touched; the gap is now about a fifth of the eye box.
+          - **Tapping the temperature or the AQI badge opens the weather app** — MIUI weather first, then a few other ROMs, then weather.miui.com in a browser.
+          - **Long-press on the standby pill finally does something.** Hold it and it shivers; swipe up while it shivers and it disappears for three minutes, then comes back by itself. The same hold-and-swipe works on the notification card, and the shiver is actually visible: the window now has slack on both sides, so the card moves inside it instead of being clipped by it.
+          - **Lyrics are steadier.** A failed lookup no longer poisons that track for the rest of the session; a late answer is stored instead of thrown away; the drift allowance is 400 ms instead of 700; and while timed lyrics are on, the playback position is re-read every second. Retries back off 15 s, 30 s, 60 s, so a track with no lyrics anywhere does not turn into a network loop.
+          - **Baseus earbud battery.** When the classic A2DP accessory has no readable battery, the app now looks for the same device over BLE: a GATT read of the standard battery service and a notification subscription, whichever answers first, plus — when the BLE address differs from the classic one, which is normal on TWS — an 8-second name-matched scan to find the twin. Bowie M2 is recognised by name as well.
 
-          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面. Signing is unchanged, so this installs straight over 2.11.21. Limits worth knowing: the accessory battery path starts with a hidden platform method some ROMs block, and a classic-only headset has no GATT server to read, so some devices can only show an icon; Open-Meteo's geocoder does not list every Chinese district, which is why the resolved label is printed for you to check; and an SMS card opens the conversation, not one single message. Four hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
+          **Supported systems** — Android 8.0 and newer, built against Android 14. One universal APK: plain Java, no `lib/`. Reference family: 小米 / 红米 / POCO on MIUI 12-14 or HyperOS; MIUI also needs 后台弹出界面, and for the island to stay up after you leave the app it needs 自启动 with an unrestricted 省电策略. Signing is unchanged, so this installs straight over 2.12.23. Limits worth knowing: Android 12 and newer forbids starting a foreground service from the background, so the watchdog can only bring the island back when the app is exempt from battery optimisation — that is what the new card is for; a classic-only headset has no GATT server to read and some ROMs block the hidden platform method, so some devices can only show an icon; Open-Meteo's geocoder does not list every Chinese district, which is why the resolved label is printed for you to check; and an SMS card opens the conversation, not one single message. Four hosts are reached, and only when used: geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com for the typed city, music.163.com for lyrics. Permissions, limits and the switch table live in the README: [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md) · [中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md)
 
           ## 中文
 
           **本次更新**
-          - **灵动岛不再展开/收起。** 只有一个高度固定的胶囊，宽度随文字自己变长变短——外卖长一点，验证码短一点。原来那套点击展开、按 × 关闭、以及手指底下会突然变大的触摸区，一起删掉了。
-          - **手势按用法排列：** 单击打开应用；双击复制；左滑把这条消息永久关掉；不长按直接上滑，翻看正在轮换的东西——多个取件码、最新通知、桌面常驻、歌词。长按之后胶囊会抖动，此时上滑让它消失三分钟，到时候自己回来。
-          - **双击只复制该复制的东西**：取件码（只拿码，不带驿站名）和每日一句。别的都不响应双击。
-          - **关掉就是永久关掉。** 左滑过的卡片不会再回来，服务重启也不会。唯一的例外是音乐：只丢掉当前这张，下一首照常显示。
-          - **免打扰期间不上岛。** 手机处于免打扰、仅优先或静音时，通知、取件码、外卖、待办、来电、闹钟都不显示；桌面常驻和歌词不受影响。免打扰结束的那一刻，被压下去的卡片也不补弹。
-          - **在别的应用里来的卡片同样直接丢弃**，回到桌面也不补。这条依赖「使用情况访问」；没给这个权限时，行为跟以前一样。
-          - **小米时钟自己发的作息提醒不上岛**，它说的和闹钟提醒重复。
-          - **闹钟改成三次提醒：T-10、T-5、T-1 分钟**，每次显示 5 秒，然后回到桌面常驻；正在听歌时直接回到歌词。T 之后不再提醒，系统闹钟自己会响。左滑可以取消这一次闹钟剩下的提醒，明天的闹钟照常。点闹钟卡片打开的是时钟的闹钟列表。
-          - **每日一句太长时像条幅一样滚动**，复制它只复制那句话，后面不再拖一串温度。
-          - **设置页**：「附近设备（蓝牙）」上移到前四个权限旁边；颜色色板可以左右滑了，最后一块终于点得到；蓝牙卡下面多一行诊断，说明这台设备到底挂在哪几个 profile 上、电量该从哪儿读。只注册 A2DP 的无线耳机（包括倍思 Bowie M2）以前根本不出现，现在会显示。
-          - 岛仔的弯眼睛以前画反了，已修正。
+          - **退出应用，灵动岛不再跟着消失。** 服务改成常驻粘性，任务被划掉时不拆窗口，另有一个 15 分钟的看门狗，被系统悄悄杀掉后自己把它拉回来；重启手机或覆盖安装后也会恢复，但只在你上次是开着它的情况下恢复。设置页新增「后台常驻」卡片：显示是否已忽略电池优化，并提供「忽略电池优化」和「应用设置」（自启动 / 省电策略）两个按钮。
+          - **设置页收干净了。** 大标题下那一段介绍、以及六个权限的小字说明，全部折进标题右边一个圆形「?」按钮里；权限本身有没有给，仍然一眼能看到。
+          - **弯眼睛分开了。** 原来两只眼连在一起，现在中间留出约五分之一眼框的缝。
+          - **点温度或空气质量标识，现在会打开天气应用** —— 先试小米天气，再试几家的天气应用，都不行就用浏览器打开 weather.miui.com。
+          - **常驻胶囊的长按终于有用了。** 长按住它会抖动，此时上滑就消失三分钟，到点自己回来。通知卡片同样支持长按抖动+上滑隐藏，而且这次真的看得见：窗口两侧留了余量，卡片在窗口里移动，不再被自己的窗口裁掉。
+          - **歌词稳了一些。** 取词失败不再把这首歌永久钉死；迟到的答案会存下来而不是丢掉；播放进度的容差从 700 ms 收紧到 400 ms；开着逐字歌词时，每秒重新读一次播放进度。失败重试按 15 秒、30 秒、60 秒退避，没歌词的曲子不会变成网络空转。
+          - **倍思耳机电量。** 经典蓝牙（A2DP）读不到电量时，现在会按同一个名字去 BLE 上找它的另一面：先读标准电量服务，再订阅电量变化通知，谁先回就用谁；如果 BLE 地址和经典地址不一样（TWS 很常见），再做一次 8 秒的名字匹配扫描去找那一路。倍思 Bowie M2 也按名字认了。
 
-          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS，MIUI 还需开启「后台弹出界面」。签名未变，可直接覆盖 2.11.21 安装。要提前知道的限制：蓝牙电量第一路是隐藏接口，部分 ROM 会拦，而纯经典蓝牙耳机没有 GATT 服务可读，所以有些设备只能显示图标；Open-Meteo 的地理编码并没有收录国内每一个区，所以界面上会把解析结果显示出来让你自己核对；短信卡片打开的是会话，不是某一条。只访问四个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
+          **支持的系统** — Android 8.0 及以上，按 Android 14 编译。只有一个通用安装包：纯 Java、没有 `lib/`。主要适配小米 / 红米 / POCO 的 MIUI 12–14 与 HyperOS；MIUI 还需开启「后台弹出界面」，而想让灵动岛在你退出应用后继续活着，还要开「自启动」并把「省电策略」设为无限制。签名未变，可直接覆盖 2.12.23 安装。要提前知道的限制：Android 12 起禁止后台启动前台服务，所以看门狗只有在应用已忽略电池优化时才能把灵动岛拉回来——这就是新卡片的作用；纯经典蓝牙耳机没有 GATT 服务可读，部分 ROM 又会拦下隐藏的系统接口，所以有些设备只能显示图标；Open-Meteo 的地理编码并没有收录国内每一个区，所以界面上会把解析结果显示出来让你自己核对；短信卡片打开的是会话，不是某一条。只访问四个域名，且只在用到时才访问：geocoding-api.open-meteo.com / api.open-meteo.com / air-quality-api.open-meteo.com（手填城市才会连）与 music.163.com（联网歌词）。权限、限制和开关说明都在 README：[中文](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.zh.md) · [English](https://github.com/Kreston8/islandcn/blob/android-apk/android/README.md)
           NOTES
           echo "Publishing $TAG"
           gh release create "$TAG" dist/*.apk --title "islandcn 灵动岛 $TAG" --notes-file notes.md \

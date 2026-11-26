@@ -162,4 +162,6 @@
     <string name="bt_no_device">现在没有已连接的蓝牙设备。连上耳机或手表后再进来，这里会出现每台设备单独的开关。</string>
     <string name="weather_ok_place">已定位到 %1$s：%2$s°，AQI %3$s</string>
     <string name="label_standby_bt">蓝牙设备电量</string>
+    <string name="hidden_temporarily">灵动岛已隐藏，3 分钟后自动回来</string>
+    <string name="weather_no_app">没有找到天气应用</string>
 </resources>

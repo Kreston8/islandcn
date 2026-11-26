@@ -1,5 +1,6 @@
 package com.kreston8.islandcn;
 
+import android.animation.ValueAnimator;
 import android.app.usage.UsageEvents;
 import android.app.usage.UsageStatsManager;
 import android.content.Context;
@@ -12,6 +13,7 @@ import android.content.res.Resources;
 import android.graphics.Color;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
@@ -57,6 +59,13 @@ final class StandbyView extends FrameLayout {
     private static final int H_DP = 50;
     private static final float R_DP = 25f;
     private static final int GAP_DP = 8;
+    /** How long the finger has to rest before the pill starts shaking. */
+    private static final long PRESS_MS = 380L;
+    /** Upward travel, once armed, that counts as the hide swipe. Shorter than the card's: the pill is thin. */
+    private static final int SWIPE_DP = 30;
+    /** A second tap inside this window is a double tap, not a new gesture. */
+    private static final long DOUBLE_MS = 240L;
+
 
     private final LinearLayout row;
     private final GradientDrawable background;
@@ -69,6 +78,22 @@ final class StandbyView extends FrameLayout {
     private String copyText = "";
     /** When the last tap on the pill landed, for telling a double tap from a single one. */
     private long lastTapAt = 0L;
+    /** Fires arm() once the finger has rested; cancelled by any movement, lift or cancel. */
+    private final Handler ticker = new Handler(Looper.getMainLooper());
+    private final Runnable press = this::arm;
+    /** The service's "hide for a while", or null when the pill was built on its own. */
+    private Runnable hideAction;
+    /** The running shiver, or null while the pill is still. */
+    private ValueAnimator shaker;
+    private float downX;
+    private float downY;
+    private boolean moved;
+    private boolean armed;
+    /** True when the finger went down on the temperature or the air badge. */
+    private boolean tapWeather;
+    /** The two weather readouts, hit-tested by hand so they stay buttons without stealing gestures. */
+    private View weatherBox;
+    private View aqiBadge;
 
     StandbyView(Context context) {
         super(context);
@@ -88,20 +113,181 @@ final class StandbyView extends FrameLayout {
         addView(row, new LayoutParams(LayoutParams.WRAP_CONTENT, dp(H_DP)));
         setVisibility(View.INVISIBLE);
 
-        // A double tap copies the line of the day. It sits on the desktop, where a single tap and a
-        // long press carry no other meaning, and the listener returns false so nothing is swallowed.
-        setOnTouchListener((v, e) -> {
-            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+        // Double tap copies the line of the day, long press then swipe up silences everything for
+        // three minutes. Both live here because the pill is what the person actually sees.
+        setOnTouchListener(this::touch);
+    }
+
+    /** The service's "hide for a while", handed in so this view needs no reference to it. */
+    void setHideAction(Runnable action) {
+        hideAction = action;
+    }
+
+    /**
+     * The pill's gestures.
+     *
+     * <p>A tap is meaningless here (there is nothing to open), so a double tap copies and a long
+     * press arms a swipe. Swallowing the stream is what makes the long press repeatable: the launcher
+     * behind the pill never sees a half gesture.
+     */
+    private boolean touch(View view, MotionEvent event) {
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+                downX = event.getRawX();
+                downY = event.getRawY();
+                moved = false;
+                armed = false;
+                tapWeather = inside(weatherBox, downX, downY) || inside(aqiBadge, downX, downY);
                 long now = SystemClock.uptimeMillis();
-                if (now - lastTapAt <= 240L) {
+                if (now - lastTapAt <= DOUBLE_MS) {
                     lastTapAt = 0L;
                     copyPill();
                 } else {
                     lastTapAt = now;
+                    ticker.postDelayed(press, PRESS_MS);
                 }
-            }
+                return true;
+            case MotionEvent.ACTION_MOVE:
+                if (!moved && (Math.abs(event.getRawX() - downX) > dp(8)
+                        || Math.abs(event.getRawY() - downY) > dp(8))) {
+                    moved = true;
+                    if (!armed) {
+                        // A swipe that starts as a swipe is not a long press.
+                        ticker.removeCallbacks(press);
+                    }
+                }
+                return true;
+            case MotionEvent.ACTION_UP:
+                ticker.removeCallbacks(press);
+                if (armed) {
+                    armed = false;
+                    stopShake();
+                    float travel = event.getRawY() - downY;
+                    if (-travel > dp(SWIPE_DP) && hideAction != null) {
+                        hideAction.run();
+                    }
+                    return true;
+                }
+                // A tap on the temperature or the air badge is a button, not decoration.
+                if (!moved && tapWeather) {
+                    openWeather();
+                }
+                return true;
+            case MotionEvent.ACTION_CANCEL:
+                ticker.removeCallbacks(press);
+                armed = false;
+                lastTapAt = 0L;
+                stopShake();
+                return true;
+            default:
+                return true;
+        }
+    }
+
+    /**
+     * Whether a raw screen point falls inside a child of the pill.
+     *
+     * <p>The children are not made clickable on purpose: a clickable child would consume the
+     * gesture and the pill would lose its double tap and its long press over that area. Asking the
+     * view where it is on screen keeps both.
+     */
+    private boolean inside(View child, float rawX, float rawY) {
+        if (child == null || child.getWidth() == 0 || child.getHeight() == 0) {
             return false;
+        }
+        try {
+            int[] origin = new int[2];
+            child.getLocationOnScreen(origin);
+            return rawX >= origin[0] && rawY >= origin[1]
+                    && rawX < origin[0] + child.getWidth() && rawY < origin[1] + child.getHeight();
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** The long press landed: say so with a shiver and a tick. */
+    private void arm() {
+        if (armed) {
+            return;
+        }
+        armed = true;
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS);
+        startShake();
+    }
+
+    /**
+     * Shivers the content inside the pill.
+     *
+     * <p>The pill's background is this view, and this view is the whole window, so translating it
+     * would be clipped by its own surface. The row inside moves instead, which reads as the pill
+     * shaking while nothing leaves its bounds.
+     */
+    private void startShake() {
+        stopShake();
+        shaker = ValueAnimator.ofFloat(0f, 1f);
+        shaker.setDuration(90L);
+        shaker.setRepeatCount(ValueAnimator.INFINITE);
+        shaker.setRepeatMode(ValueAnimator.RESTART);
+        shaker.addUpdateListener(animation -> {
+            float fraction = animation.getAnimatedFraction();
+            float wave = (float) Math.sin(fraction * Math.PI * 2f);
+            // The content moves inside the row's 12 dp padding and tilts a hair, so the shiver stays
+            // visible without the window surface clipping it, and the pill squeezes inward.
+            row.setTranslationX(wave * dp(3));
+            row.setRotation(wave * 0.9f);
+            float squeeze = 1f - 0.03f * Math.abs(wave);
+            setScaleX(squeeze);
+            setScaleY(squeeze);
         });
+        shaker.start();
+    }
+
+    private void stopShake() {
+        if (shaker != null) {
+            shaker.cancel();
+            shaker = null;
+        }
+        row.setTranslationX(0f);
+        row.setRotation(0f);
+        setScaleX(1f);
+        setScaleY(1f);
+    }
+
+    /**
+     * Opens the weather app, because a temperature on the desktop is a button, not decoration.
+     *
+     * <p>MIUI's own weather app is tried first, then the usual vendor packages, then the web page.
+     * Nothing here needs a permission.
+     */
+    private void openWeather() {
+        String[] known = {
+                "com.miui.weather2",
+                "com.miui.weather",
+                "com.huawei.android.totemweather",
+                "com.coloros.weather2",
+                "com.android.weather",
+        };
+        for (String name : known) {
+            try {
+                Intent launch = getContext().getPackageManager().getLaunchIntentForPackage(name);
+                if (launch != null) {
+                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    getContext().startActivity(launch);
+                    return;
+                }
+            } catch (Throwable ignored) {
+                // Try the next package.
+            }
+        }
+        try {
+            Intent web = new Intent(Intent.ACTION_VIEW, Uri.parse("https://weather.miui.com"));
+            web.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(web);
+            return;
+        } catch (Throwable ignored) {
+            // No browser either.
+        }
+        Toast.makeText(getContext(), R.string.weather_no_app, Toast.LENGTH_SHORT).show();
     }
 
     boolean hasContent() {
@@ -166,6 +352,8 @@ final class StandbyView extends FrameLayout {
         signature = next;
 
         face = null;
+        weatherBox = null;
+        aqiBadge = null;
         row.removeAllViews();
         int count = 0;
         // Nothing is copied until the quote is actually drawn.
@@ -175,13 +363,15 @@ final class StandbyView extends FrameLayout {
                 if (!weatherOn || temperature == null) {
                     continue;
                 }
-                row.addView(weatherIcon(code, temperature));
+                weatherBox = weatherIcon(code, temperature);
+                row.addView(weatherBox);
                 count++;
             } else if ("aqi".equals(item)) {
                 if (!aqiOn || air == null || air.isEmpty()) {
                     continue;
                 }
                 TextView badge = label("AQI " + air, aqiColor(air), 12.5f, true);
+                aqiBadge = badge;
                 row.addView(badge, margin());
                 count++;
             } else if ("puppy".equals(item)) {

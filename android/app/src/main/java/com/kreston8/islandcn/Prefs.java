@@ -71,6 +71,14 @@ final class Prefs {
     static final String KEY_DELIVERY_QIXIAN = "dl_qixian";
     /** Prefix for the per-accessory switch; the device address is appended to it. */
     static final String KEY_BT_DEVICE = "bt_ok:";
+    /**
+     * Whether the island was on the last time the process was alive.
+     *
+     * <p>Written by {@link IslandService}, read by {@link KeepAlive} after a reboot: a person who
+     * switched the island off must not find it running again after every restart.
+     */
+    static final String KEY_RUNNING = "running";
+
 
     /** The order a fresh install starts with, and the source of every known item. */
     private static final String[] ORDER_DEFAULT = {"weather", "aqi", "puppy", "quote", "bt"};
@@ -96,6 +104,20 @@ final class Prefs {
         } catch (Throwable ignored) {
             // A read-only profile keeps the previous value; nothing to recover from.
         }
+    }
+
+    /**
+     * True when the island was switched on and has not been switched off since.
+     *
+     * <p>Defaults to false ({@link #opt}) rather than true, so a freshly installed app does not start
+     * itself after a reboot before the person ever opened it.
+     */
+    static boolean running(Context context) {
+        return opt(context, KEY_RUNNING);
+    }
+
+    static void setRunning(Context context, boolean running) {
+        set(context, KEY_RUNNING, running);
     }
 
     /** True when a card of this kind is allowed. */

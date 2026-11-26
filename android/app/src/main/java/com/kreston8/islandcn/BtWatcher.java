@@ -5,9 +5,13 @@ import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattDescriptor;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
@@ -27,7 +31,7 @@ import java.util.UUID;
 /**
  * Connected Bluetooth accessories and the battery level they report.
  *
- * <p>Android has no public battery API for accessories, so a level is hunted down in three steps,
+ * <p>Android has no public battery API for accessories, so a level is hunted down in four steps,
  * cheapest first, and the first one that answers wins:
  *
  * <ol>
@@ -35,14 +39,18 @@ import java.util.UUID;
  *       system's own Bluetooth screen prints. It is greylisted, so plenty of ROMs refuse it.</li>
  *   <li>The system's {@code BATTERY_LEVEL_CHANGED} broadcast, sent when a device pushes a level
  *       right after connecting. This is cached and persisted.</li>
- *   <li>A GATT read of the standard Battery Service ({@code 0x180F} / {@code 0x2A19}) for LE and
- *       dual-mode accessories. Classic-only headsets have no GATT server, so for those the first
- *       two steps are all there is.</li>
+ *   <li>A GATT read of the standard Battery Service ({@code 0x180F} / {@code 0x2A19}), plus a
+ *       notification subscription on the same characteristic, for LE and dual-mode accessories.</li>
+ *   <li>A BLE twin address for classic-only accessories, looked up by name with an eight second LE
+ *       scan. TWS earbuds register with the system as A2DP, and their battery service sits on the
+ *       BLE side, often under an address the system never reports. The address found is stored as
+ *       {@code ble:<classic address>}, so later reads go straight to it and no scan is repeated.</li>
  * </ol>
  *
  * <p>A read costs the accessory a connection, so each device is asked at most once every ten
- * minutes and the connection is closed the moment the value arrives (or after nine seconds).
- * Levels are persisted, so a restart does not throw away what the system already told us.
+ * minutes, only one accessory is connected and only one scan runs at a time, and the connection is
+ * closed the moment the value arrives (or after nine seconds). Levels are persisted, so a restart
+ * does not throw away what the system already told us.
  */
 final class BtWatcher extends BroadcastReceiver {
 
@@ -54,21 +62,31 @@ final class BtWatcher extends BroadcastReceiver {
     private static final String PREFS = "island_bt";
     private static final String PREFIX_LEVEL = "lv:";
     private static final String PREFIX_NAME = "nm:";
+    /** Classic address to BLE twin address, learned by one scan and never guessed again. */
+    private static final String PREFIX_BLE = "ble:";
 
     /** Battery service and its level characteristic, the only standard way to ask a device. */
     private static final UUID SERVICE_BATTERY = UUID.fromString("0000180f-0000-1000-8000-00805f9b34fb");
     private static final UUID CHAR_LEVEL = UUID.fromString("00002a19-0000-1000-8000-00805f9b34fb");
+    /** Client Characteristic Configuration, written to subscribe to the level notification. */
+    private static final UUID DESCRIPTOR_CCCD = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
     /** A read opens a connection to the accessory, so it is not repeated more often than this. */
     private static final long ASK_GAP_MS = 10L * 60L * 1000L;
     private static final long ASK_TIMEOUT_MS = 9000L;
+    /** A scan for the BLE twin of a classic headset; it is stopped on the first name match. */
+    private static final long SCAN_TIMEOUT_MS = 8000L;
 
     private final Map<String, Integer> levels = new LinkedHashMap<>();
     private final Map<String, String> names = new LinkedHashMap<>();
     /** When each address was last asked over GATT, so a silent device is not asked every redraw. */
     private final Map<String, Long> askedAt = new LinkedHashMap<>();
+    /** Classic address to the BLE address the battery service was found on. */
+    private final Map<String, String> bleOf = new LinkedHashMap<>();
     private final Handler handler = new Handler(Looper.getMainLooper());
     private Runnable onLevel;
     private boolean loaded;
+    /** True while a name scan runs, so two classic accessories never scan at the same time. */
+    private volatile boolean scanning;
 
     /** Called after a level arrives, so the chips on screen can be redrawn without a new card. */
     void levelListener(Runnable listener) {
@@ -258,10 +276,12 @@ final class BtWatcher extends BroadcastReceiver {
             String name = watcher.nameOf(context, device, address);
             Integer known = watcher.levels.get(address);
             int system = reflectLevel(device);
+            String twin = watcher.bleOf.get(address);
             out.append('\n').append(name).append(" | ").append(via.get(address))
                     .append(" | ").append(probeType(device))
                     .append(" | 电量 ").append(known == null || known < 0 ? "无" : known + "%")
-                    .append(" | 系统 ").append(system < 0 ? "无" : system + "%");
+                    .append(" | 系统 ").append(system < 0 ? "无" : system + "%")
+                    .append(" | BLE 地址 ").append(twin == null || twin.isEmpty() ? "未扫描" : twin);
         }
         return out.toString();
     }
@@ -319,6 +339,9 @@ final class BtWatcher extends BroadcastReceiver {
         if (connected.isEmpty()) {
             return null;
         }
+
+        // A device that dropped off can be asked again the moment it reconnects.
+        pruneAsked(connected);
         List<IslandEvent.Bt> chips = new ArrayList<>();
         for (BluetoothDevice device : connected.values()) {
             if (device == null) {
@@ -386,10 +409,11 @@ final class BtWatcher extends BroadcastReceiver {
     }
 
     /**
-     * Reads the battery service over GATT.
+     * Asks the accessory for its battery service, if it is due.
      *
-     * <p>Only LE and dual-mode devices answer; a classic headset has no GATT server, so its level
-     * still depends on the broadcast. The result is delivered through {@link #onLevel}.
+     * <p>An LE or dual-mode accessory is read on its own address. A classic-only accessory has no
+     * GATT server there, so its BLE twin is looked up by name first; a twin found earlier is used
+     * straight away and the scan is skipped. The result arrives through {@link #onLevel}.
      */
     private void requestGatt(Context context, BluetoothDevice device, String address) {
         if (address.isEmpty() || !shouldAsk(System.currentTimeMillis(), address)) {
@@ -401,11 +425,49 @@ final class BtWatcher extends BroadcastReceiver {
         } catch (Throwable ignored) {
             return;
         }
-        if (type != BluetoothDevice.DEVICE_TYPE_LE && type != BluetoothDevice.DEVICE_TYPE_DUAL) {
+        String twin = bleOf.get(address);
+        if (twin != null && !twin.isEmpty()) {
+            // The LE side of this accessory is already known: connect to it, no scan needed.
+            askedAt.put(address, System.currentTimeMillis());
+            readBattery(context, address, twin);
+            return;
+        }
+        if (type == BluetoothDevice.DEVICE_TYPE_LE || type == BluetoothDevice.DEVICE_TYPE_DUAL) {
+            askedAt.put(address, System.currentTimeMillis());
+            readBattery(context, address, address);
+            return;
+        }
+        if (type != BluetoothDevice.DEVICE_TYPE_CLASSIC || scanning) {
+            // No usable type, or a lookup is already running: only one scan is ever in flight.
             return;
         }
         askedAt.put(address, System.currentTimeMillis());
+        scanTwin(context, device, address);
+    }
+
+    /**
+     * Reads the standard battery service over GATT, over the LE transport.
+     *
+     * <p>{@code key} is the address the chip is filed under, which is what the system reports;
+     * {@code bleAddress} is the address actually connected to, which differs for a classic headset
+     * and its BLE twin. A read and a notification subscription are both started, because some
+     * earbuds only push the value; whichever answers first closes the connection.
+     */
+    private void readBattery(Context context, final String key, String bleAddress) {
         final Context app = context.getApplicationContext();
+        BluetoothAdapter adapter = adapterOf(app);
+        if (adapter == null) {
+            return;
+        }
+        BluetoothDevice target;
+        try {
+            target = adapter.getRemoteDevice(bleAddress);
+        } catch (Throwable ignored) {
+            return;
+        }
+        if (target == null) {
+            return;
+        }
         final BluetoothGatt[] open = new BluetoothGatt[1];
         final boolean[] done = new boolean[1];
         BluetoothGattCallback callback = new BluetoothGattCallback() {
@@ -420,7 +482,7 @@ final class BtWatcher extends BroadcastReceiver {
                     }
                 }
                 if (newState != BluetoothProfile.STATE_CONNECTED) {
-                    finish(app, gatt, open, done, address, -1);
+                    finish(app, gatt, open, done, key, -1);
                 }
             }
 
@@ -428,38 +490,219 @@ final class BtWatcher extends BroadcastReceiver {
             public void onServicesDiscovered(BluetoothGatt gatt, int status) {
                 BluetoothGattCharacteristic characteristic = levelOf(gatt);
                 if (characteristic == null) {
-                    finish(app, gatt, open, done, address, -1);
+                    finish(app, gatt, open, done, key, -1);
                     return;
                 }
                 try {
                     gatt.readCharacteristic(characteristic);
                 } catch (Throwable ignored) {
-                    finish(app, gatt, open, done, address, -1);
+                    // The notification subscription below may still answer.
+                }
+                try {
+                    gatt.setCharacteristicNotification(characteristic, true);
+                    BluetoothGattDescriptor descriptor = characteristic.getDescriptor(DESCRIPTOR_CCCD);
+                    if (descriptor != null) {
+                        descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
+                        gatt.writeDescriptor(descriptor);
+                    }
+                } catch (Throwable ignored) {
+                    // No subscription: the read above, or the nine second timeout, decides.
                 }
             }
 
             @Override
             public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic,
                                              int status) {
-                finish(app, gatt, open, done, address, levelFrom(characteristic));
+                finish(app, gatt, open, done, key, levelFrom(characteristic));
             }
 
             @Override
             public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic,
                                              byte[] value, int status) {
-                finish(app, gatt, open, done, address, levelOfBytes(value));
+                finish(app, gatt, open, done, key, levelOfBytes(value));
+            }
+
+            @Override
+            public void onCharacteristicChanged(BluetoothGatt gatt,
+                                                BluetoothGattCharacteristic characteristic) {
+                finish(app, gatt, open, done, key, levelFrom(characteristic));
+            }
+
+            @Override
+            public void onCharacteristicChanged(BluetoothGatt gatt,
+                                                BluetoothGattCharacteristic characteristic, byte[] value) {
+                finish(app, gatt, open, done, key, levelOfBytes(value));
             }
         };
         try {
-            BluetoothGatt gatt = device.connectGatt(app, false, callback, BluetoothDevice.TRANSPORT_LE);
+            BluetoothGatt gatt = target.connectGatt(app, false, callback, BluetoothDevice.TRANSPORT_LE);
             if (gatt == null) {
                 return;
             }
             open[0] = gatt;
-            handler.postDelayed(() -> finish(app, open[0], open, done, address, -1), ASK_TIMEOUT_MS);
+            handler.postDelayed(() -> finish(app, open[0], open, done, key, -1), ASK_TIMEOUT_MS);
         } catch (Throwable ignored) {
             // A refused connection leaves the previous value, or the icon-only chip, in place.
         }
+    }
+
+    /**
+     * Looks up the BLE twin of a classic-only accessory by name.
+     *
+     * <p>TWS earbuds register with the system as A2DP devices, but the battery service sits on the
+     * BLE side, under an address the system never reports; a plain {@code connectGatt} on the
+     * classic address therefore fails. An eight second LE scan compares every advertised name with
+     * the classic one (case-insensitive, either containing the other, ignoring a {@code -L}/{@code
+     * -R}/" (L)"/"(R)" suffix), and the first match is remembered so the scan happens once ever.
+     *
+     * <p>Scanning needs {@code BLUETOOTH_SCAN}: every call is guarded, so a refused scan silently
+     * leaves the icon-only chip this file would produce anyway.
+     */
+    private void scanTwin(Context context, BluetoothDevice device, final String address) {
+        final Context app = context.getApplicationContext();
+        BluetoothAdapter adapter = adapterOf(app);
+        if (adapter == null) {
+            return;
+        }
+        String raw = deviceName(device);
+        if (raw.isEmpty()) {
+            raw = names.get(address);
+        }
+        final String target = bareName(raw);
+        if (target.length() < 3) {
+            // Without a name there is nothing to compare, and a guess would take a wrong device.
+            return;
+        }
+        BluetoothLeScanner found;
+        try {
+            found = adapter.getBluetoothLeScanner();
+        } catch (Throwable ignored) {
+            return;
+        }
+        if (found == null) {
+            return;
+        }
+        final BluetoothLeScanner scanner = found;
+        final boolean[] stopped = new boolean[1];
+        ScanCallback callback = new ScanCallback() {
+            @Override
+            public void onScanResult(int callbackType, ScanResult result) {
+                try {
+                    if (result == null) {
+                        return;
+                    }
+                    BluetoothDevice hit = result.getDevice();
+                    if (hit == null) {
+                        return;
+                    }
+                    if (!namesMatch(target, bareName(recordName(result, hit)))) {
+                        return;
+                    }
+                    String twin = addressOf(hit);
+                    if (twin.isEmpty() || twin.equals(address)) {
+                        return;
+                    }
+                    if (stopScan(scanner, this, stopped)) {
+                        bleOf.put(address, twin);
+                        persist(app, PREFIX_BLE + address, twin);
+                        readBattery(app, address, twin);
+                    }
+                } catch (Throwable ignored) {
+                    // A vendor ScanResult that will not be read only costs this one hit.
+                }
+            }
+
+            @Override
+            public void onScanFailed(int errorCode) {
+                stopScan(scanner, this, stopped);
+            }
+        };
+        try {
+            scanner.startScan(callback);
+        } catch (Throwable ignored) {
+            // BLUETOOTH_SCAN not granted, or scanning switched off: keep the old three steps.
+            return;
+        }
+        scanning = true;
+        handler.postDelayed(() -> stopScan(scanner, callback, stopped), SCAN_TIMEOUT_MS);
+    }
+
+    /** Stops a scan once; a second caller finds it already stopped and does nothing. */
+    private boolean stopScan(BluetoothLeScanner scanner, ScanCallback callback, boolean[] stopped) {
+        synchronized (stopped) {
+            if (stopped[0]) {
+                return false;
+            }
+            stopped[0] = true;
+        }
+        scanning = false;
+        try {
+            scanner.stopScan(callback);
+        } catch (Throwable ignored) {
+            // Already stopped, or BLUETOOTH_SCAN was revoked while the scan ran.
+        }
+        return true;
+    }
+
+    /** The adapter, or null when the ROM exposes no Bluetooth service at all. */
+    private static BluetoothAdapter adapterOf(Context context) {
+        try {
+            BluetoothManager manager =
+                    (BluetoothManager) context.getSystemService(Context.BLUETOOTH_SERVICE);
+            return manager == null ? null : manager.getAdapter();
+        } catch (Throwable failure) {
+            return null;
+        }
+    }
+
+    /** The name a scan result carries, falling back to the device's own name. */
+    private static String recordName(ScanResult result, BluetoothDevice device) {
+        String name = null;
+        try {
+            if (result.getScanRecord() != null) {
+                name = result.getScanRecord().getDeviceName();
+            }
+        } catch (Throwable ignored) {
+            // Some vendor records throw when the advertised name is malformed.
+        }
+        if (name == null || name.trim().isEmpty()) {
+            name = deviceName(device);
+        }
+        return name;
+    }
+
+    private static String deviceName(BluetoothDevice device) {
+        try {
+            String name = device.getName();
+            return name == null ? "" : name.trim();
+        } catch (Throwable ignored) {
+            return "";
+        }
+    }
+
+    /** Lower case, with a -L/-R/(L)/(R) tail removed, so two spellings of one accessory match. */
+    private static String bareName(String raw) {
+        String name = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+        String[] tails = {" (l)", " (r)", "(l)", "(r)", "-l", "-r", "_l", "_r", " l", " r"};
+        boolean changed = true;
+        while (changed && !name.isEmpty()) {
+            changed = false;
+            for (String tail : tails) {
+                if (name.length() > tail.length() && name.endsWith(tail)) {
+                    name = name.substring(0, name.length() - tail.length()).trim();
+                    changed = true;
+                }
+            }
+        }
+        return name;
+    }
+
+    /** Case-insensitive, either name containing the other; both must be specific enough. */
+    private static boolean namesMatch(String target, String found) {
+        if (target.length() < 3 || found.length() < 3) {
+            return false;
+        }
+        return found.contains(target) || target.contains(found);
     }
 
     /** Delivers one result and closes the connection; the first caller wins. */
@@ -495,6 +738,29 @@ final class BtWatcher extends BroadcastReceiver {
     private boolean shouldAsk(long now, String address) {
         Long last = askedAt.get(address);
         return last == null || now - last >= ASK_GAP_MS;
+    }
+
+    /**
+     * Forgets when a device was last asked, once it is no longer connected.
+     *
+     * <p>A reconnect then asks again at once instead of waiting out the ten minute gap. Called only
+     * with a non-empty list of connected devices: a missing permission also reports nothing
+     * connected, and that must not wipe the table.
+     */
+    private void pruneAsked(Map<String, BluetoothDevice> connected) {
+        try {
+            List<String> gone = new ArrayList<>();
+            for (String address : askedAt.keySet()) {
+                if (!connected.containsKey(address)) {
+                    gone.add(address);
+                }
+            }
+            for (String address : gone) {
+                askedAt.remove(address);
+            }
+        } catch (Throwable ignored) {
+            // An odd map implementation only costs a throttled retry.
+        }
     }
 
     private static BluetoothGattCharacteristic levelOf(BluetoothGatt gatt) {
@@ -583,6 +849,8 @@ final class BtWatcher extends BroadcastReceiver {
         }
         if (lower.contains("buds") || lower.contains("pods") || lower.contains("headset")
                 || lower.contains("headphone") || lower.contains("earbud") || lower.contains("耳机")
+                // Baseus Bowie earbuds, the ones this watch was written for, carry no keyword.
+                || lower.contains("baseus") || lower.contains("倍思") || lower.contains("bowie")
                 || lower.contains("sound") || lower.contains("speaker")) {
             return R.drawable.ic_bt_headset;
         }
@@ -625,6 +893,9 @@ final class BtWatcher extends BroadcastReceiver {
                     }
                 } else if (key.startsWith(PREFIX_NAME)) {
                     names.put(key.substring(PREFIX_NAME.length()), text);
+                } else if (key.startsWith(PREFIX_BLE)) {
+                    // An address learned by an earlier scan: connect straight to it, no scan needed.
+                    bleOf.put(key.substring(PREFIX_BLE.length()), text);
                 }
             }
         } catch (Throwable ignored) {

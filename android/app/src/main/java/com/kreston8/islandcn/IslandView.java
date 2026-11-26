@@ -161,6 +161,9 @@ public final class IslandView extends FrameLayout {
         cardBackground.setCornerRadius(dp(R_DP));
         card.setBackground(cardBackground);
         addView(card, new FrameLayout.LayoutParams(minWidthPx, dp(H_DP)));
+        // The window wraps this view, so the card can only travel inside it if there is slack on
+        // both sides; without the padding the long-press shake would be clipped by the surface.
+        setPadding(dp(6), 0, dp(6), 0);
 
         expandedBox = new LinearLayout(context);
         expandedBox.setOrientation(LinearLayout.HORIZONTAL);
@@ -533,14 +536,19 @@ public final class IslandView extends FrameLayout {
 
     private void startShake() {
         stopShake();
-        final float amplitude = dp(4);
+        final float amplitude = dp(5);
         shaker = ValueAnimator.ofFloat(0f, 1f);
         shaker.setDuration(620L);
         shaker.setRepeatCount(ValueAnimator.INFINITE);
         shaker.setInterpolator(new LinearInterpolator());
         shaker.addUpdateListener(animation -> {
             float phase = (float) animation.getAnimatedValue() * (float) Math.PI * 6f;
-            card.setTranslationX((float) Math.sin(phase) * amplitude);
+            float wave = (float) Math.sin(phase);
+            card.setTranslationX(wave * amplitude);
+            // A squeeze that only ever shrinks, so the shiver survives a tightly composited window.
+            float squeeze = 1f - 0.025f * Math.abs(wave);
+            card.setScaleX(squeeze);
+            card.setScaleY(squeeze);
         });
         shaker.start();
     }
@@ -551,6 +559,8 @@ public final class IslandView extends FrameLayout {
             shaker = null;
         }
         card.setTranslationX(0f);
+        card.setScaleX(1f);
+        card.setScaleY(1f);
     }
 
     private void updateCountdown() {

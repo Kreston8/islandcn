@@ -197,9 +197,14 @@ App 里是一个两级列表，一级开关从上到下共九个：
    因为号码不再提供给第三方应用。
 5. **使用情况访问**（`PACKAGE_USAGE_STATS`），可选，但「只在桌面显示」和桌面常驻都靠它判断前台。
    播歌时每 2.5 秒一次查询，桌面常驻生效时每 4 秒一次。
-6. **附近设备**（`BLUETOOTH_CONNECT`），可选，只有 Android 12+ 会问，用来拿设备名和已连接列表。
+6. **附近设备**（`BLUETOOTH_CONNECT`，另加 Android 12+ 的 `BLUETOOTH_SCAN`（`neverForLocation`）），
+   可选，用来拿设备名、已连接列表，以及电量为蓝牙芯片做的那次短 BLE 同名扫描。
 7. MIUI / HyperOS 还要给这个 App 开 **后台弹出界面**，否则系统会把后台发起的悬浮窗丢掉。
 8. Android 13+ 会问 `POST_NOTIFICATIONS`，前台服务的状态通知要用。
+9. **电池优化**（`REQUEST_IGNORE_BATTERY_OPTIMIZATIONS`，可选），另加 MIUI 应用页里的「自启动」和
+   「省电策略 → 无限制」。Android 12 起禁止后台启动前台服务，所以那个 15 分钟的看门狗只有在应用
+   已忽略电池优化时才能把灵动岛拉回来。设置页的「后台常驻」卡片会显示状态并直达这两个页面；
+   开机恢复靠 `RECEIVE_BOOT_COMPLETED`（不弹窗），且只在你上次是开着它的时候恢复。
 
 ## 它做不到什么
 

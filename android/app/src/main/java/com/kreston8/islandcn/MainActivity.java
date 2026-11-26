@@ -1,16 +1,23 @@
 package com.kreston8.islandcn;
 
 import android.Manifest;
+import android.animation.Animator;
+import android.animation.AnimatorListenerAdapter;
+import android.animation.ValueAnimator;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.view.View;
+import android.os.PowerManager;
+import android.provider.Settings;
 import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.widget.Switch;
 import android.widget.Button;
 import android.widget.EditText;
@@ -33,6 +40,10 @@ public final class MainActivity extends Activity {
     private static final int COLOR_OK = 0xFF34C759;
     private static final int COLOR_MISSING = 0xFFFF9F0A;
     private static final int COLOR_IDLE = 0xFF7C7C86;
+    /** Fill of the round "?" toggles; the one piece of chrome that is not a card. */
+    private static final int COLOR_HELP = 0xFF2A2A33;
+    /** Fold key for the always-on card, which has a literal title rather than a string id. */
+    private static final int FOLD_ALWAYS_ON = 1;
 
     private TextView overlayState;
     private TextView accessState;
@@ -50,6 +61,9 @@ public final class MainActivity extends Activity {
     private LinearLayout swatches;
     private SeekBar alphaBar;
     private TextView alphaValue;
+    private TextView batteryState;
+    /** Fold keys of the small print the user has unfolded, kept for the life of the process. */
+    private final java.util.Set<Integer> unfolded = new java.util.HashSet<Integer>();
     /** Every first-level switch, so resume can re-read them and rebuild the open second level. */
     private final java.util.List<Primary> primaries = new java.util.ArrayList<Primary>();
 
@@ -66,55 +80,62 @@ public final class MainActivity extends Activity {
         scroll.addView(root);
         setContentView(scroll);
 
-        root.addView(text(R.string.setup_title, 26f, COLOR_PRIMARY, true));
+        LinearLayout titleRow = new LinearLayout(this);
+        titleRow.setOrientation(LinearLayout.HORIZONTAL);
+        titleRow.setGravity(Gravity.CENTER_VERTICAL);
+        titleRow.addView(text(R.string.setup_title, 26f, COLOR_PRIMARY, true),
+                new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        root.addView(titleRow);
 
         TextView subtitle = text(R.string.setup_subtitle, 13f, COLOR_SECONDARY, false);
         subtitle.setLineSpacing(dp(3), 1f);
-        addFill(root, subtitle, 8);
+        LinearLayout subtitleBox = foldBox(R.string.setup_subtitle, subtitle);
+        addFill(root, subtitleBox, 8);
+        titleRow.addView(helpButton(R.string.setup_subtitle, subtitleBox), helpParams());
 
         LinearLayout overlayCard = card();
-        addFill(overlayCard, text(R.string.perm_overlay_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(overlayCard, text(R.string.perm_overlay_desc, 13f, COLOR_SECONDARY, false), 6);
+        helpHeader(overlayCard, R.string.perm_overlay_title,
+                text(R.string.perm_overlay_desc, 13f, COLOR_SECONDARY, false));
         overlayState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(overlayCard, overlayState, 10);
         addTop(overlayCard, button(R.string.grant, v -> Perms.openOverlaySettings(this)), 12);
         addFill(root, overlayCard, 24);
 
         LinearLayout accessCard = card();
-        addFill(accessCard, text(R.string.perm_access_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(accessCard, text(R.string.perm_access_desc, 13f, COLOR_SECONDARY, false), 6);
+        helpHeader(accessCard, R.string.perm_access_title,
+                text(R.string.perm_access_desc, 13f, COLOR_SECONDARY, false));
         accessState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(accessCard, accessState, 10);
         addTop(accessCard, button(R.string.grant, v -> Perms.openNotificationAccessSettings(this)), 12);
         addFill(root, accessCard, 14);
 
         LinearLayout smsCard = card();
-        addFill(smsCard, text(R.string.perm_sms_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(smsCard, text(R.string.perm_sms_desc, 13f, COLOR_SECONDARY, false), 6);
+        helpHeader(smsCard, R.string.perm_sms_title,
+                text(R.string.perm_sms_desc, 13f, COLOR_SECONDARY, false));
         smsState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(smsCard, smsState, 10);
         addTop(smsCard, button(R.string.grant, v -> requestSms()), 12);
         addFill(root, smsCard, 14);
 
         LinearLayout phoneCard = card();
-        addFill(phoneCard, text(R.string.perm_phone_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(phoneCard, text(R.string.perm_phone_desc, 13f, COLOR_SECONDARY, false), 6);
+        helpHeader(phoneCard, R.string.perm_phone_title,
+                text(R.string.perm_phone_desc, 13f, COLOR_SECONDARY, false));
         phoneState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(phoneCard, phoneState, 10);
         addTop(phoneCard, button(R.string.grant, v -> requestPhone()), 12);
         addFill(root, phoneCard, 14);
 
         LinearLayout usageCard = card();
-        addFill(usageCard, text(R.string.perm_usage_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(usageCard, text(R.string.perm_usage_desc, 13f, COLOR_SECONDARY, false), 6);
+        helpHeader(usageCard, R.string.perm_usage_title,
+                text(R.string.perm_usage_desc, 13f, COLOR_SECONDARY, false));
         usageState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(usageCard, usageState, 10);
         addTop(usageCard, button(R.string.grant, v -> Perms.openUsageAccessSettings(this)), 12);
         addFill(root, usageCard, 14);
 
         LinearLayout btCard = card();
-        addFill(btCard, text(R.string.perm_bt_title, 16f, COLOR_PRIMARY, true), 0);
-        addFill(btCard, text(R.string.perm_bt_desc, 13f, COLOR_SECONDARY, false), 6);
+        helpHeader(btCard, R.string.perm_bt_title,
+                text(R.string.perm_bt_desc, 13f, COLOR_SECONDARY, false));
         btState = text(R.string.missing, 13f, COLOR_MISSING, true);
         addFill(btCard, btState, 10);
         btDiagView = new TextView(this);
@@ -134,6 +155,30 @@ public final class MainActivity extends Activity {
         addTop(serviceCard, startStop, 12);
         addTop(serviceCard, button(R.string.preview, v -> preview()), 8);
         addFill(root, serviceCard, 14);
+
+        LinearLayout keepCard = card();
+        TextView keepDesc = text("MIUI 上要让岛一直活着，需要三步：①「自启动」里允许本 App；"
+                        + "②省电策略设为「无限制」；③在最近任务里把本 App 锁定。\n"
+                        + "本 App 已是前台服务，正常情况退出界面后仍会常驻。",
+                13f, COLOR_SECONDARY, false);
+        keepDesc.setLineSpacing(dp(3), 1f);
+        helpHeader(keepCard, "后台常驻", FOLD_ALWAYS_ON, keepDesc);
+        batteryState = text("未忽略电池优化", 13f, COLOR_MISSING, true);
+        addFill(keepCard, batteryState, 8);
+        LinearLayout keepRow = new LinearLayout(this);
+        keepRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button batteryButton = button("忽略电池优化", v -> requestIgnoreBattery());
+        batteryButton.setTextSize(13f);
+        Button appButton = button("应用设置", v -> openAppSettings());
+        appButton.setTextSize(13f);
+        LinearLayout.LayoutParams batteryParams = new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f);
+        batteryParams.rightMargin = dp(8);
+        keepRow.addView(batteryButton, batteryParams);
+        keepRow.addView(appButton, new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        addFill(keepCard, keepRow, 12);
+        addFill(root, keepCard, 14);
 
         LinearLayout featuresCard = card();
         addFill(featuresCard, text(R.string.settings_title, 16f, COLOR_PRIMARY, true), 0);
@@ -270,6 +315,11 @@ public final class MainActivity extends Activity {
         serviceState.setText(running ? R.string.service_on : R.string.service_off);
         serviceState.setTextColor(running ? COLOR_OK : COLOR_IDLE);
         startStop.setText(running ? R.string.stop_island : R.string.start);
+        if (batteryState != null) {
+            boolean ignoring = ignoresBatteryOptimizations();
+            batteryState.setText(ignoring ? "已忽略电池优化" : "未忽略电池优化");
+            batteryState.setTextColor(ignoring ? COLOR_OK : COLOR_MISSING);
+        }
         refreshWeatherState();
     }
 
@@ -669,7 +719,9 @@ public final class MainActivity extends Activity {
             toast(R.string.granted);
             return;
         }
-        requestPermissions(new String[]{Manifest.permission.BLUETOOTH_CONNECT}, 4);
+        requestPermissions(new String[]{
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN}, 4);
     }
 
     /**
@@ -720,6 +772,137 @@ public final class MainActivity extends Activity {
         button.setPadding(dp(10), dp(4), dp(10), dp(4));
         return button;
     }
+    /** The round grey "?" that unfolds the small print belonging to one title. */
+    private View helpButton(final int key, final View body) {
+        TextView toggle = new TextView(this);
+        toggle.setText("?");
+        toggle.setTextSize(12f);
+        toggle.setTextColor(COLOR_PRIMARY);
+        toggle.setGravity(Gravity.CENTER);
+        toggle.setBackground(circle(COLOR_HELP));
+        toggle.setContentDescription("展开说明");
+        toggle.setOnClickListener(v -> toggleFold(key, body));
+        return toggle;
+    }
+
+    private LinearLayout.LayoutParams helpParams() {
+        return new LinearLayout.LayoutParams(dp(26), dp(26));
+    }
+
+    /**
+     * A card's title line with its "?" at the right edge, plus the small print it folds away.
+     *
+     * <p>Only the description goes into the foldable box: the status line under it stays outside,
+     * so a granted or missing mark never hides behind the toggle.
+     */
+    private LinearLayout helpHeader(LinearLayout cardView, int titleRes, View body) {
+        return helpHeader(cardView, getString(titleRes), titleRes, body);
+    }
+
+    private LinearLayout helpHeader(LinearLayout cardView, CharSequence title, int key, View body) {
+        LinearLayout box = foldBox(key, body);
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.addView(text(title, 16f, COLOR_PRIMARY, true), new LinearLayout.LayoutParams(
+                0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        row.addView(helpButton(key, box), helpParams());
+        addFill(cardView, row, 0);
+        addFill(cardView, box, 6);
+        return box;
+    }
+
+    /** The container that folds one block of small print; its open state is remembered by key. */
+    private LinearLayout foldBox(int key, View body) {
+        LinearLayout box = new LinearLayout(this);
+        box.setOrientation(LinearLayout.VERTICAL);
+        box.addView(body, new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
+        box.setVisibility(unfolded.contains(key) ? View.VISIBLE : View.GONE);
+        return box;
+    }
+
+    /** Remembers one block's open state, so a rebuilt page shows the same small print. */
+    private void toggleFold(int key, View box) {
+        if (unfolded.contains(key)) {
+            unfolded.remove(key);
+            animateFold(box, false);
+        } else {
+            unfolded.add(key);
+            animateFold(box, true);
+        }
+    }
+
+    /** Opens or closes one block by animating its height over 170ms, so the page does not jump. */
+    private void animateFold(final View box, final boolean show) {
+        final ViewGroup.LayoutParams params = box.getLayoutParams();
+        int width = box.getParent() instanceof View ? ((View) box.getParent()).getWidth() : 0;
+        if (params == null || width <= 0) {
+            // Never laid out (or already detached): all this box can do is appear and disappear.
+            box.setVisibility(show ? View.VISIBLE : View.GONE);
+            return;
+        }
+        final int from = show ? 0 : box.getHeight();
+        int target = 0;
+        if (show) {
+            // Measured at the parent's width, because a GONE child has no width of its own yet.
+            box.measure(View.MeasureSpec.makeMeasureSpec(width, View.MeasureSpec.AT_MOST),
+                    View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED));
+            target = box.getMeasuredHeight();
+            params.height = 0;
+        }
+        box.setVisibility(View.VISIBLE);
+        box.requestLayout();
+        ValueAnimator animator = ValueAnimator.ofInt(from, target);
+        animator.setDuration(170);
+        animator.addUpdateListener(animation -> {
+            params.height = ((Integer) animation.getAnimatedValue()).intValue();
+            box.requestLayout();
+        });
+        animator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                params.height = ViewGroup.LayoutParams.WRAP_CONTENT;
+                box.setVisibility(show ? View.VISIBLE : View.GONE);
+                box.requestLayout();
+            }
+        });
+        animator.start();
+    }
+
+    /** Whether the system exempts this app from battery optimisation; false before API 23. */
+    private boolean ignoresBatteryOptimizations() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return false;
+        }
+        try {
+            PowerManager power = (PowerManager) getSystemService(POWER_SERVICE);
+            return power != null && power.isIgnoringBatteryOptimizations(getPackageName());
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** The battery exemption page, falling back to the app details page when a ROM has none. */
+    private void requestIgnoreBattery() {
+        try {
+            startActivity(new Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Throwable ignored) {
+            Toast.makeText(this, "打不开电池优化设置页，已打开应用设置页", Toast.LENGTH_LONG).show();
+            openAppSettings();
+        }
+    }
+
+    private void openAppSettings() {
+        try {
+            startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())));
+        } catch (Throwable ignored) {
+            Toast.makeText(this, "打不开应用设置页", Toast.LENGTH_LONG).show();
+        }
+    }
+
     private void toast(int resId) {
         Toast.makeText(this, resId, Toast.LENGTH_LONG).show();
     }
@@ -733,8 +916,12 @@ public final class MainActivity extends Activity {
     }
 
     private Button button(int resId, View.OnClickListener listener) {
+        return button(getString(resId), listener);
+    }
+
+    private Button button(CharSequence label, View.OnClickListener listener) {
         Button button = new Button(this);
-        button.setText(resId);
+        button.setText(label);
         button.setAllCaps(false);
         button.setTextColor(COLOR_PRIMARY);
         button.setBackground(rounded(0xFF23232B, 12f));
@@ -744,8 +931,12 @@ public final class MainActivity extends Activity {
     }
 
     private TextView text(int resId, float size, int color, boolean bold) {
+        return text(getString(resId), size, color, bold);
+    }
+
+    private TextView text(CharSequence label, float size, int color, boolean bold) {
         TextView view = new TextView(this);
-        view.setText(resId);
+        view.setText(label);
         view.setTextSize(size);
         view.setTextColor(color);
         if (bold) {
@@ -759,6 +950,14 @@ public final class MainActivity extends Activity {
         drawable.setShape(GradientDrawable.RECTANGLE);
         drawable.setColor(color);
         drawable.setCornerRadius(dp(radiusDp));
+        return drawable;
+    }
+
+    /** The fill behind the round "?" toggles. */
+    private GradientDrawable circle(int color) {
+        GradientDrawable drawable = new GradientDrawable();
+        drawable.setShape(GradientDrawable.OVAL);
+        drawable.setColor(color);
         return drawable;
     }
 

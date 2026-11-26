@@ -106,7 +106,7 @@ final class DaozaiView extends View {
 
         float cx = getWidth() / 2f + shift;
         float cy = getHeight() / 2f + bob;
-        float gap = size * 0.30f;
+        float gap = size * 0.46f;
         float open = openAt(t);
 
         paint.setStyle(Paint.Style.FILL);
